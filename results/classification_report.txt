@@ -1,0 +1,10 @@
+Best Model: Logistic Regression
+
+              precision    recall  f1-score   support
+
+  Not Placed       0.51      0.55      0.53      9108
+      Placed       0.60      0.57      0.58     10892
+
+    accuracy                           0.56     20000
+   macro avg       0.56      0.56      0.56     20000
+weighted avg       0.56      0.56      0.56     20000

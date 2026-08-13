@@ -1,0 +1,19 @@
+PLACEPRO - FINAL MACHINE LEARNING RESULTS
+==========================================
+
+Dataset Samples: 100000
+Features Used: 29
+
+MODEL PERFORMANCE
+-----------------
+
+              Model  Accuracy  Precision   Recall  F1 Score  ROC-AUC
+Logistic Regression   0.55780   0.599360 0.567113  0.582791 0.585430
+      Random Forest   0.55720   0.590521 0.609714  0.599964 0.577219
+            XGBoost   0.56150   0.574456 0.751561  0.651181 0.571464
+      Decision Tree   0.53245   0.574065 0.548292  0.560883 0.544603
+
+==========================================
+Best Model: Logistic Regression
+Best Accuracy: 0.5578
+Best ROC-AUC: 0.5854
