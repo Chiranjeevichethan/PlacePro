@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+
+# Trained ML models
+models/*.pkl
+
+# Generated outputs
+outputs/*.png
+outputs/*.jpg
+outputs/*.jpeg
+
+# OS
+.DS_Store
+Thumbs.db
