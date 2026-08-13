@@ -1,0 +1,58 @@
+PLACEPRO PHASE 4 - FINAL RESULTS
+================================
+
+Dataset samples : 100,000
+Features used   : 23 raw -> 38 after engineering + encoding
+Train / Test    : 80,000 / 20,000 (stratified)
+
+CLASS IMBALANCE
+---------------
+Placed     : 54,459 (54.46%)
+Not Placed : 45,541 (45.54%)
+Ratio      : 1.196 (mild -> weighting tested, not assumed)
+
+MODEL SELECTION LOGIC
+---------------------
+Primary metric : ROC-AUC (threshold-independent, robust to imbalance)
+Tie-breaker    : F1 Score
+Confirmation   : Stratified 5-fold cross-validation
+
+BASELINE MODELS (Phase 3 defaults, test set)
+---------------------------------------------
+              Model  Accuracy  Precision   Recall  F1 Score  ROC-AUC
+Logistic Regression   0.55780   0.599360 0.567113  0.582791 0.585430
+      Random Forest   0.55610   0.594501 0.581620  0.587990 0.576088
+            XGBoost   0.56150   0.574456 0.751561  0.651181 0.571464
+      Decision Tree   0.53245   0.574065 0.548292  0.560883 0.544606
+
+TUNED MODELS (test set, sorted by ROC-AUC)
+------------------------------------------
+                      Model  Accuracy  Precision   Recall  F1 Score  ROC-AUC
+Logistic Regression (Tuned)   0.55790   0.599437 0.567297  0.582925 0.585442
+            XGBoost (Tuned)   0.56700   0.575233 0.783419  0.663376 0.582271
+      Random Forest (Tuned)   0.56405   0.567877 0.834557  0.675862 0.577682
+
+TUNED MODELS CROSS-VALIDATION
+-----------------------------
+                      Model  CV Mean Accuracy  CV Accuracy Std  CV Mean ROC-AUC  CV ROC-AUC Std
+Logistic Regression (Tuned)           0.56061         0.003762         0.585383        0.004030
+      Random Forest (Tuned)           0.56661         0.001967         0.579069        0.003798
+            XGBoost (Tuned)           0.56903         0.002286         0.582932        0.003479
+
+FINAL MODEL
+-----------
+Model            : Random Forest (Tuned)
+Accuracy         : 0.5641
+Precision        : 0.5679
+Recall           : 0.8346
+F1 Score         : 0.6759
+ROC-AUC          : 0.5777
+CV mean accuracy : 0.5666
+CV mean ROC-AUC  : 0.5791
+Selection logic  : ROC-AUC primary, tolerance 0.0081 (= 2x CV std), F1 tie-break
+
+PREDICTION FUNCTION
+-------------------
+from src.predictor import predict_placement
+result = predict_placement(student_data_dict)
+result['status'] / result['probability']
