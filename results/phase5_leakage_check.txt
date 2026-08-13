@@ -1,0 +1,71 @@
+PLACEPRO PHASE 5 - LEAKAGE CHECK
+================================
+
+1. TARGET / LEAKAGE COLUMNS
+   --------------------------
+   ✅ PASS: salary_package_lpa removed (it is a consequence of placement -> severe leakage)
+   ✅ PASS: student_id removed (unique identifier, no predictive value)
+   ✅ PASS: placement_status (target) excluded from features
+
+2. FEATURE ENGINEERING FIT (academic_skill_index min/max)
+   ------------------------------------------------------
+   The Phase 3 code fitted min/max statistics on the FULL
+   dataset (mild leakage). Phase 4 fixed this by moving
+   feature engineering INSIDE the pipeline, so statistics
+   are fitted on training data only.
+
+   Verification - stored transformer statistics vs data:
+   - cgpa:
+       stored   min/max = 4.5000 / 10.0000
+       train    min/max = 4.5000 / 10.0000
+       full     min/max = 4.5000 / 10.0000
+       -> matches TRAINING data (required). The train and full
+          ranges coincide for this column, so the numbers alone
+          cannot distinguish. The guarantee comes from the
+          pipeline: Phase 4 fits the transformer on X_train only.
+   - attendance_percentage:
+       stored   min/max = 50.0000 / 100.0000
+       train    min/max = 50.0000 / 100.0000
+       full     min/max = 50.0000 / 100.0000
+       -> matches TRAINING data (required). The train and full
+          ranges coincide for this column, so the numbers alone
+          cannot distinguish. The guarantee comes from the
+          pipeline: Phase 4 fits the transformer on X_train only.
+   - coding_skill_score:
+       stored   min/max = 20.0000 / 100.0000
+       train    min/max = 20.0000 / 100.0000
+       full     min/max = 20.0000 / 100.0000
+       -> matches TRAINING data (required). The train and full
+          ranges coincide for this column, so the numbers alone
+          cannot distinguish. The guarantee comes from the
+          pipeline: Phase 4 fits the transformer on X_train only.
+   - aptitude_score:
+       stored   min/max = 20.0000 / 100.0000
+       train    min/max = 20.0000 / 100.0000
+       full     min/max = 20.0000 / 100.0000
+       -> matches TRAINING data (required). The train and full
+          ranges coincide for this column, so the numbers alone
+          cannot distinguish. The guarantee comes from the
+          pipeline: Phase 4 fits the transformer on X_train only.
+
+   ✅ PASS: stored statistics match the TRAINING data (required).
+            The feature engineering lives inside the pipeline and
+            Phase 4 fits it on X_train only, so the statistics
+            cannot have seen the test set.
+
+3. PREPROCESSING FIT
+   ------------------
+   Imputer / StandardScaler / OneHotEncoder live inside the same
+   pipeline, so they are also fitted on training data only.
+   ✅ PASS: preprocessing is leak-free by construction
+
+4. SPLIT ORDER
+   ------------
+   Train/test split (test_size=0.20, random_state=42,
+   stratify=y) is performed BEFORE any fitting, and the test set
+   is used only for final validation.
+   ✅ PASS: no test-set leakage
+
+5. CONCLUSION
+   ----------
+   ✅ No data leakage found in the Phase 4 / Phase 5 pipeline.

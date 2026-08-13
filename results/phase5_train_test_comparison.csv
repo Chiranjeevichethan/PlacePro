@@ -1,0 +1,6 @@
+Metric,Train,Test,Gap (Train - Test)
+Accuracy,0.6459,0.5641,0.0819
+Precision,0.6204,0.5679,0.0525
+Recall,0.9013,0.8346,0.0667
+F1 Score,0.7349,0.6759,0.0591
+ROC-AUC,0.7288,0.5777,0.1511

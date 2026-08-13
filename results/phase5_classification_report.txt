@@ -1,0 +1,15 @@
+PLACEPRO PHASE 5 - CLASSIFICATION REPORT
+=========================================
+
+Model : RandomForestClassifier (Phase 4 tuned)
+Source: models/placepro_tuned_best_model.pkl
+Split : test_size=0.20, random_state=42, stratify=y
+
+              precision    recall  f1-score   support
+
+  Not Placed       0.55      0.24      0.33      9108
+      Placed       0.57      0.83      0.68     10892
+
+    accuracy                           0.56     20000
+   macro avg       0.56      0.54      0.51     20000
+weighted avg       0.56      0.56      0.52     20000

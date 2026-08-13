@@ -1,0 +1,40 @@
+PLACEPRO PHASE 5 - FINAL RESULTS
+================================
+
+Model            : RandomForestClassifier (Phase 4 tuned)
+Model file       : models/placepro_tuned_best_model.pkl
+Test set         : 20,000 rows (untouched stratified holdout)
+
+TEST METRICS
+------------
+Accuracy  : 0.5641
+Precision : 0.5679
+Recall    : 0.8346
+F1 Score  : 0.6759
+ROC-AUC   : 0.5777
+
+CROSS-VALIDATION (Stratified 5-fold)
+------------------------------------
+   Metric  Fold 1  Fold 2  Fold 3  Fold 4  Fold 5   Mean    Std
+ Accuracy  0.5671  0.5672  0.5688  0.5629  0.5671 0.5666 0.0020
+Precision  0.5702  0.5703  0.5700  0.5676  0.5699 0.5696 0.0010
+   Recall  0.8327  0.8330  0.8478  0.8284  0.8359 0.8356 0.0066
+ F1 Score  0.6769  0.6770  0.6817  0.6737  0.6778 0.6774 0.0026
+  ROC-AUC  0.5801  0.5748  0.5858  0.5764  0.5783 0.5791 0.0038
+
+CLASSIFICATION REPORT
+---------------------
+              precision    recall  f1-score   support
+
+  Not Placed       0.55      0.24      0.33      9108
+      Placed       0.57      0.83      0.68     10892
+
+    accuracy                           0.56     20000
+   macro avg       0.56      0.54      0.51     20000
+weighted avg       0.56      0.56      0.52     20000
+
+CONFUSION MATRIX
+----------------
+                   Pred Not Placed  Pred Placed
+Actual Not Placed             2191         6917
+Actual Placed                 1802         9090

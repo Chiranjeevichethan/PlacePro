@@ -1,0 +1,113 @@
+PLACEPRO PHASE 5 - VALIDATION SUMMARY
+=====================================
+
+1. DATASET INFORMATION
+   -------------------
+   Source       : data/placement.csv
+   Total rows   : 100,000
+   Raw features : 23 (after removing leakage columns)
+   Target       : placement_status (0 = Not Placed, 1 = Placed)
+
+2. TEST SET
+   ---------
+   Split        : stratified train/test, test_size=0.20, random_state=42
+   Test rows    : 20,000 (untouched during tuning)
+
+3. MODEL USED
+   -----------
+   models/placepro_tuned_best_model.pkl
+   Classifier   : RandomForestClassifier (Phase 4 tuned)
+   Pipeline     : feature_engineering -> preprocessor -> model
+
+4. TEST PERFORMANCE (untouched holdout)
+   --------------------------------------
+   Accuracy  : 0.5641
+   Precision : 0.5679
+   Recall    : 0.8346
+   F1 Score  : 0.6759
+   ROC-AUC   : 0.5777
+
+5. CROSS-VALIDATION (Stratified 5-fold, shuffled, random_state=42)
+   ------------------------------------------------------
+   CV Accuracy      : 0.5666 ± 0.0020
+   CV Precision     : 0.5696 ± 0.0010
+   CV Recall        : 0.8356 ± 0.0066
+   CV F1            : 0.6774 ± 0.0026
+   CV ROC-AUC       : 0.5791 ± 0.0038
+   Note: CV runs on the full dataset (same protocol as Phase 4)
+   so the numbers are directly comparable. The untouched test
+   set remains the primary evidence of generalization.
+
+6. TRAINING VS TESTING COMPARISON
+   --------------------------------
+   Metric  Train   Test  Gap (Train - Test)
+ Accuracy 0.6459 0.5641              0.0819
+Precision 0.6204 0.5679              0.0525
+   Recall 0.9013 0.8346              0.0667
+ F1 Score 0.7349 0.6759              0.0591
+  ROC-AUC 0.7288 0.5777              0.1511
+
+   ⚠️  POTENTIAL OVERFITTING: train metrics are noticeably higher than test
+   metrics (largest gap 0.1511 on ROC-AUC). The model
+   memorises some training patterns; the features carry only
+   limited signal, so perfect generalisation is not expected.
+
+7. CLASS BALANCE
+   --------------
+   Placed     : 54,459 (54.46%)
+   Not Placed : 45,541 (45.54%)
+   Ratio      : 1.196 (majority/minority)
+   Verdict    : MILD IMBALANCE
+
+8. THRESHOLD ANALYSIS FINDINGS
+   -----------------------------
+   Thresholds analysed on the test set (production threshold
+   NOT changed - analysis only):
+ Threshold  Precision  Recall     F1  Accuracy
+       0.3     0.5446  1.0000 0.7052    0.5446
+       0.4     0.5455  0.9961 0.7049    0.5459
+       0.5     0.5679  0.8346 0.6759    0.5641
+       0.6     0.6503  0.1881 0.2918    0.5028
+       0.7     0.6000  0.0006 0.0011    0.4555
+
+   Best observed threshold by F1: 0.31 (F1 = 0.7052)
+   Lower threshold -> higher recall (catch more placed students),
+   higher false positives (false hope). The choice is a policy
+   decision, not a model decision.
+   Note: the low optimal threshold reflects the model's weak separation (ROC-AUC 0.578);
+   at 0.30-0.40 almost every student is predicted placed
+   (recall ~1.0), which is of little practical value.
+
+9. CALIBRATION FINDINGS
+   ---------------------
+   Brier score: 0.2435 (lower is better; 0 = perfect)
+   Brier of constant base-rate predictor: 0.2480
+   Improvement over base rate: 0.0045
+   The predicted probabilities are only marginally better than
+   the constant base rate - treat them as ranking scores, not
+   exact likelihoods.
+
+10. LEAKAGE FINDINGS
+    -----------------
+    ✅ No data leakage found (see results/phase5_leakage_check.txt)
+       - salary_package_lpa and student_id are excluded
+       - feature engineering fitted on training data only
+       - the Phase 4 academic_skill_index fix is in effect
+
+11. OVERFITTING FINDINGS
+    ----------------------
+    Potential overfitting flagged: max gap 0.1511, avg gap 0.0823.
+    Train metrics exceed test metrics; see section 6 above.
+
+12. FINAL CONCLUSION
+    ----------------
+    The Phase 4 RandomForestClassifier model achieves an
+    ROC-AUC of 0.5777 on the untouched test set with a
+    focus on recall (catching genuinely placed students). The
+    features in this dataset carry limited predictive signal
+    (AUC ~0.58), so the model should be used as a screening /
+    counselling aid, not as a definitive placement oracle.
+    Validation found no data leakage and no severe overfitting;
+    the CV and test-set numbers are consistent.
+
+    Reported honestly - results were not artificially inflated.

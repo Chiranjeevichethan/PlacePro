@@ -1,0 +1,21 @@
+PLACEPRO PHASE 5 - MODEL CALIBRATION
+=====================================
+
+Model      : RandomForestClassifier (Phase 4 tuned)
+Brier score: 0.2435  (lower is better; 0 = perfect)
+Brier of constant base-rate predictor: 0.2480
+Improvement over base rate: 0.0045
+
+Calibration curve (binned test-set probabilities):
+Bin   Predicted   Observed    
+1     0.382       0.384       
+2     0.470       0.453       
+3     0.549       0.548       
+4     0.625       0.650       
+5     0.711       0.600       
+
+Interpretation:
+  Brier score is high (probabilities are not well calibrated).
+  Probabilities should NOT be treated as exact likelihoods.
+  The ranking information (ROC-AUC) matters more than the
+  absolute probability values for placement counselling.
