@@ -18,7 +18,7 @@ from sklearn.metrics import accuracy_score, classification_report
 # ==============================
 
 try:
-    df = pd.read_csv("placement.csv")
+    df = pd.read_csv("data/placement.csv")
 except:
     print("❌ ERROR: placement.csv not found. Put file in same folder.")
     exit()
@@ -94,7 +94,7 @@ if 'projects_count' in df.columns:
 plt.figure()
 sns.countplot(x=target, data=df)
 plt.title("Placement Distribution")
-plt.savefig("placement_distribution.png")
+plt.savefig("outputs/placement_distribution.png")
 plt.close()
 
 # CGPA vs Placement
@@ -102,14 +102,14 @@ if 'cgpa' in df.columns:
     plt.figure()
     sns.boxplot(x=target, y='cgpa', data=df)
     plt.title("CGPA vs Placement")
-    plt.savefig("cgpa_vs_placement.png")
+    plt.savefig("outputs/cgpa_vs_placement.png")
     plt.close()
 
 # Heatmap
 plt.figure(figsize=(10,6))
 sns.heatmap(df.corr(), cmap='coolwarm')
 plt.title("Correlation Heatmap")
-plt.savefig("heatmap.png")
+plt.savefig("outputs/heatmap.png")
 plt.close()
 
 # ==============================
@@ -166,14 +166,14 @@ feat_df = pd.DataFrame({
 plt.figure(figsize=(8,5))
 sns.barplot(x='Importance', y='Feature', data=feat_df)
 plt.title("Feature Importance")
-plt.savefig("feature_importance.png")
+plt.savefig("outputs/feature_importance.png")
 plt.close()
 
 # ==============================
 # 10. SAVE RESULTS
 # ==============================
 
-with open("results.txt", "w") as f:
+with open("outputs/results.txt", "w") as f:
     f.write("Decision Tree Accuracy: " + str(dt_acc) + "\n")
     f.write("Random Forest Accuracy: " + str(rf_acc) + "\n")
 
