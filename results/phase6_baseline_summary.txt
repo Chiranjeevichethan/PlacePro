@@ -1,0 +1,51 @@
+PLACEPRO PHASE 6 - BASELINE SUMMARY
+===================================
+
+DATASET
+-------
+Source       : data/placement_phase6.csv
+Rows         : 100,000
+Columns      : 17 (after removing leakage columns)
+Duplicates   : 0
+Missing      : none in features (salary_package_lpa removed)
+Target       : placement_status (0 = Not Placed, 1 = Placed)
+Class ratio  : 2.172 (majority/minority)
+
+TRAIN / TEST SPLIT
+------------------
+Test size    : 0.20 (stratified, random_state=42)
+Train rows   : 80,000
+Test rows    : 20,000
+
+BASELINE MODELS (test set, sorted by ROC-AUC)
+----------------------------------------------
+              Model  Accuracy  Precision   Recall  F1 Score  ROC-AUC
+Logistic Regression    0.6325   0.795474 0.623658  0.699165 0.685590
+            XGBoost    0.6957   0.716620 0.919022  0.805298 0.679636
+      Random Forest    0.6406   0.779679 0.662286  0.716203 0.677831
+      Decision Tree    0.5928   0.769597 0.578532  0.660525 0.634849
+
+STRATIFIED 5-FOLD CROSS-VALIDATION
+----------------------------------
+              Model  CV Mean Accuracy  CV Accuracy Std  CV Mean ROC-AUC  CV ROC-AUC Std
+Logistic Regression            0.6300           0.0039           0.6858          0.0034
+      Decision Tree            0.5928           0.0043           0.6316          0.0015
+      Random Forest            0.6402           0.0030           0.6773          0.0033
+            XGBoost            0.6968           0.0010           0.6792          0.0032
+
+BEST BASELINE (by ROC-AUC)
+---------------------------
+Model    : Logistic Regression
+Accuracy : 0.6325
+Precision: 0.7955
+Recall   : 0.6237
+F1 Score : 0.6992
+ROC-AUC  : 0.6856
+
+NOTES
+-----
+- Baseline only: NO hyperparameter tuning was performed.
+- salary_package_lpa was removed (post-placement leakage).
+- No oversampling or target manipulation was applied.
+- 'Always predict majority' would score ~68.5% accuracy,
+  so accuracy alone is a weak yardstick on this dataset.

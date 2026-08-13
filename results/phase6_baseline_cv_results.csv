@@ -1,0 +1,5 @@
+Model,CV Mean Accuracy,CV Accuracy Std,CV Mean ROC-AUC,CV ROC-AUC Std
+Logistic Regression,0.63,0.0039,0.6858,0.0034
+Decision Tree,0.5928,0.0043,0.6316,0.0015
+Random Forest,0.6402,0.003,0.6773,0.0033
+XGBoost,0.6968,0.001,0.6792,0.0032
