@@ -143,6 +143,34 @@ uvicorn backend.app.main:app --reload
 python backend/tests/test_predict_profile.py        # 38 checks (needs server for HTTP)
 ```
 
+### Phase 12 — Skill gap + placement readiness engine
+
+- **`GET /api/profile/{id}/readiness`** — transparent rule-based analysis of a
+  **verified** profile: 0-100 readiness score with a documented breakdown,
+  evidence-based strengths, skill gaps vs. a configurable placement skill
+  requirement set, and a prioritized improvement plan (unverified -> 422)
+- **`GET /api/profile/{id}/placement-summary`** — Phase 11 ML prediction **and**
+  Phase 12 readiness reported side by side (never merged)
+- All skill logic lives in one configurable module
+  (`backend/app/services/skill_taxonomy.py`): 8-category taxonomy, exact-match
+  normalization (`js`→JavaScript, `ml`→Machine Learning, `dsa`→[Data
+  Structures, Algorithms], ...), and the requirement set with documented
+  HIGH/MEDIUM/LOW priorities
+- Honesty rules: missing skills are reported as *"not found in verified
+  profile"* (never "student does not know X"); skill presence is never
+  converted into a numeric skill score; the readiness score is NOT ML
+  accuracy and is never presented as such
+- ML placement probability still comes ONLY from the Phase 8 model
+  (accuracy ~63% / ROC-AUC 0.685 — unchanged, 90% not claimed)
+- Full details: `docs/phase12_skill_gap_readiness.md`
+
+Run Phase 12:
+
+```bash
+uvicorn backend.app.main:app --reload
+python backend/tests/test_readiness.py              # 82 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.
