@@ -78,6 +78,15 @@ class Provenance(BaseModel):
     ml: List[str] = Field(default_factory=list)
 
 
+class PredictionHistoryEntry(BaseModel):
+    """One recorded prediction for a profile (resume itself is never stored)."""
+
+    timestamp: str
+    model_version: str
+    placement_probability: float
+    prediction: str
+
+
 class StudentProfile(BaseModel):
     """The canonical unified student profile."""
 
@@ -93,6 +102,7 @@ class StudentProfile(BaseModel):
     ml_inputs: MlInputs = Field(default_factory=MlInputs)
     provenance: Provenance = Field(default_factory=Provenance)
     verified: bool = False
+    prediction_history: List[PredictionHistoryEntry] = Field(default_factory=list)
 
 
 class ProfileCompletion(BaseModel):
@@ -110,3 +120,20 @@ class ProfileResponse(BaseModel):
     profile: StudentProfile
     completion: ProfileCompletion
     message: str
+
+
+class ProfilePredictionResponse(BaseModel):
+    """Response of POST /api/profile/{profile_id}/predict.
+
+    ready_for_prediction=False (with `reason` and/or `missing_fields`)
+    means the model was NOT called - nothing is invented.
+    """
+
+    ready_for_prediction: bool
+    prediction: Optional[str] = None
+    placement_probability: Optional[float] = None
+    confidence: Optional[float] = None
+    model_version: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+    prediction_history: List[PredictionHistoryEntry] = Field(default_factory=list)

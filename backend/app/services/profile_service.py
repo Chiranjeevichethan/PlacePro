@@ -19,8 +19,10 @@ import re
 import sys
 import threading
 import uuid
+from datetime import datetime, timezone
 
 from .ml_feature_mapping import check_profile_completion
+from .prediction_service import predict as predict_with_model
 from .resume_service import process_resume_upload
 
 # Project root on sys.path (same pattern as prediction_service)
@@ -183,6 +185,7 @@ def build_draft_from_resume(filename: str, content: bytes, content_type=None):
             "ml": [],
         },
         "verified": False,
+        "prediction_history": [],
     }
 
     _save(profile)
@@ -232,6 +235,10 @@ def verify_profile(submitted: dict):
         user_paths = collect_nonempty_paths(_editable_view(submitted))
         resume_paths = []
 
+    # prediction_history is server-controlled: never accept it from the
+    # client (it would let a student forge history).
+    history = (existing or {}).get("prediction_history", []) if existing else []
+
     profile = {
         **submitted,
         "profile_id": profile_id or str(uuid.uuid4()),
@@ -241,6 +248,7 @@ def verify_profile(submitted: dict):
             "ml": [],
         },
         "verified": True,
+        "prediction_history": history,
     }
 
     _save(profile)
@@ -274,6 +282,7 @@ def update_profile(profile_id: str, submitted: dict):
         if p not in user_paths
     ]
 
+    # prediction_history is server-controlled (never from the client)
     profile = {
         **submitted,
         "profile_id": profile_id,
@@ -283,8 +292,73 @@ def update_profile(profile_id: str, submitted: dict):
             "ml": [],
         },
         "verified": False,
+        "prediction_history": existing.get("prediction_history", []),
     }
 
     _save(profile)
     completion = check_profile_completion(profile)
     return profile, completion
+
+
+# ------------------------------------------------------------
+# PREDICTION (Phase 11)
+# ------------------------------------------------------------
+
+
+def predict_for_profile(profile_id: str) -> dict:
+    """Predict placement for a profile using the existing Phase 8 model.
+
+    Flow: load -> verified check -> ML feature mapping -> completeness
+    check -> src.pipeline.predict_placement() -> record history.
+
+    The model is NEVER called for unverified or incomplete profiles,
+    and missing features are NEVER invented.
+    """
+    profile = _load(profile_id)  # raises ProfileNotFoundError
+    history = profile.get("prediction_history", [])
+
+    if not profile.get("verified"):
+        return {
+            "ready_for_prediction": False,
+            "prediction": None,
+            "placement_probability": None,
+            "confidence": None,
+            "model_version": None,
+            "reason": "Student profile must be verified first.",
+            "prediction_history": history,
+        }
+
+    completion = check_profile_completion(profile)
+    if not completion["profile_complete"]:
+        return {
+            "ready_for_prediction": False,
+            "prediction": None,
+            "placement_probability": None,
+            "confidence": None,
+            "model_version": None,
+            "missing_fields": completion["missing_fields"],
+            "prediction_history": history,
+        }
+
+    # All 16 Phase 8 features are available (verified + complete)
+    ml_inputs = completion["ml_feature_mapping"]
+    result = predict_with_model(ml_inputs)
+
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "model_version": result["model_version"],
+        "placement_probability": result["placement_probability"],
+        "prediction": result["prediction"],
+    }
+    history = history + [entry]
+    profile["prediction_history"] = history
+    _save(profile)
+
+    return {
+        "ready_for_prediction": True,
+        "prediction": result["prediction"],
+        "placement_probability": result["placement_probability"],
+        "confidence": result["confidence"],
+        "model_version": result["model_version"],
+        "prediction_history": history,
+    }

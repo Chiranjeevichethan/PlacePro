@@ -120,6 +120,29 @@ uvicorn backend.app.main:app --reload
 python backend/tests/test_profile.py                # 69 checks (needs server for HTTP)
 ```
 
+### Phase 11 — Verified profile → placement prediction
+
+- **`POST /api/profile/{id}/predict`** — connects a **verified, complete**
+  profile to the existing Phase 8 model (`models/placepro_final_model.pkl`
+  via `src/pipeline.py`; no second model, no retraining, no duplicated
+  feature engineering)
+- Guards: profile must exist (404), must be **verified** (`verified: true`),
+  and all 16 ML features must be present — otherwise the model is never
+  called and `missing_fields` / `reason` are returned (nothing invented)
+- Returns `ready_for_prediction`, `prediction`, `placement_probability`,
+  `confidence`, `model_version` and records a **prediction history** on the
+  profile (timestamp, model_version, probability, prediction; server-controlled)
+- **Accuracy is ~63% / ROC-AUC 0.685 — 90% is NOT claimed** (actual Phase 8
+  metrics, unchanged)
+- Full details: `docs/phase11_prediction_integration.md`
+
+Run Phase 11:
+
+```bash
+uvicorn backend.app.main:app --reload
+python backend/tests/test_predict_profile.py        # 38 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.

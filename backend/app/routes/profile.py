@@ -13,13 +13,18 @@
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from ..schemas_profile import ProfileResponse, StudentProfile
+from ..schemas_profile import (
+    ProfilePredictionResponse,
+    ProfileResponse,
+    StudentProfile,
+)
 from ..services.profile_service import (
     InvalidProfileError,
     ProfileNotFoundError,
     ProfileServiceError,
     build_draft_from_resume,
     get_profile,
+    predict_for_profile,
     update_profile,
     verify_profile,
 )
@@ -141,3 +146,30 @@ def profile_update(profile_id: str, profile: StudentProfile):
         "completion": completion,
         "message": "Profile updated. Re-confirm the profile to verify it.",
     }
+
+
+@router.post(
+    "/{profile_id}/predict",
+    response_model=ProfilePredictionResponse,
+    summary="Predict placement for a verified, complete profile (Phase 8 model)",
+)
+def profile_predict(profile_id: str):
+    """Predict placement using the existing Phase 8 final model.
+
+    Guards (model is NEVER called otherwise):
+      - profile must exist (else 404)
+      - profile must be verified
+      - all 16 ML features must be present (missing ones are returned,
+        never invented)
+
+    The model path is fixed (models/placepro_final_model.pkl) - the
+    client cannot choose a model.
+    """
+    try:
+        return predict_for_profile(profile_id)
+    except ProfileServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500, detail=f"Prediction failed: {exc}"
+        ) from exc
