@@ -1,0 +1,87 @@
+PLACEPRO PHASE 7 - VALIDATION SUMMARY
+============================================================
+
+1. DATASET
+   File: data/placement_phase6.csv
+   Rows: 100,000 (full dataset)
+   Split: 80/20 stratified, random_state=42
+   Train rows: 80,000
+   Test rows:  20,000
+
+2. LEAKAGE SAFETY
+   - salary_package_lpa removed (post-placement variable).
+   - student_id removed if present.
+   - Engineered features use FIXED domain scales (aptitude/100, skills/10, log1p counts)
+     -> no statistic fitted on the full dataset.
+   - Imputer/scaler/encoder/models fitted ONLY on training folds.
+
+3. FEATURE ENGINEERING ADDED
+   - overall_skill_score (mean of 6 normalized skills)
+   - academic_skill_index (cgpa + aptitude + DSA + coding)
+   - experience_score (log1p mean of experience counts)
+   - high_cgpa, has_internship, project_level
+   - coding_experience_interaction, cgpa_projects_interaction
+   - backlog_risk, strong_candidate_indicator
+
+4. WEAK / REDUNDANT FEATURES IDENTIFIED (correlation with target)
+   Very weak (|r| < 0.05): extracurriculars (-0.005), system_design (-0.002),
+   ml_knowledge (0.002), open_source_contributions (0.023), hackathons (0.033)
+   Weak (|r| < 0.10): aptitude (0.045), communication (0.051), certifications (0.056)
+   Strongest: cgpa (0.149), internships (0.100), coding_skills (0.088), dsa (0.087)
+   NOTE: weak features were kept (regularized models handle them safely); they
+   can be dropped later with negligible impact.
+
+5. MODEL COMPARISON
+                        Model               Tier  Accuracy  Precision   Recall       F1  ROC-AUC  CV Accuracy  CV ROC-AUC
+    Logistic Regression Tuned      Phase 7 Tuned   0.63185   0.795556 0.622271 0.698324 0.685333     0.628925    0.685795
+Logistic Regression (Phase 7) Phase 7 Engineered   0.63095   0.795157 0.621030 0.697388 0.685313          NaN         NaN
+                XGBoost Tuned      Phase 7 Tuned   0.62855   0.790254 0.622855 0.696639 0.678393     0.627487    0.678220
+      Random Forest (Phase 7) Phase 7 Engineered   0.66895   0.749365 0.776123 0.762509 0.666244          NaN         NaN
+            XGBoost (Phase 7) Phase 7 Engineered   0.69035   0.717778 0.902738 0.799702 0.665115          NaN         NaN
+Logistic Regression (Phase 6)   Phase 6 Baseline   0.63250   0.795474 0.623658 0.699165 0.685590     0.630000    0.685800
+            XGBoost (Phase 6)   Phase 6 Baseline   0.69570   0.716620 0.919022 0.805298 0.679636     0.696800    0.679200
+      Random Forest (Phase 6)   Phase 6 Baseline   0.64060   0.779679 0.662286 0.716203 0.677831     0.640200    0.677300
+      Decision Tree (Phase 6)   Phase 6 Baseline   0.59280   0.769597 0.578532 0.660525 0.634849     0.592800    0.631600
+
+6. BEST MODEL (selected by ROC-AUC, tie-break F1)
+   Logistic Regression Tuned
+   Test Accuracy : 0.6319
+   Test Precision: 0.7956
+   Test Recall   : 0.6223
+   Test F1       : 0.6983
+   Test ROC-AUC  : 0.6853
+   5-fold CV Acc : 0.6289
+   5-fold CV AUC : 0.6858
+
+7. THRESHOLD ANALYSIS (best model, analysis only)
+ Threshold  Precision   Recall       F1  Accuracy
+       0.3   0.711510 0.943848 0.811374   0.69950
+       0.4   0.748099 0.811902 0.778696   0.68400
+       0.5   0.795556 0.622271 0.698324   0.63185
+       0.6   0.838854 0.397590 0.539483   0.53520
+       0.7   0.878480 0.195838 0.320277   0.43080
+
+   Best-F1 threshold: 0.21 (F1 = 0.8153)
+   Production threshold remains 0.50 - analysis only.
+
+8. HONEST ASSESSMENT OF 90% ACCURACY
+   90% accuracy is NOT realistically achievable with this dataset without
+   leakage or label manipulation. Reasons:
+   - Strongest single-feature correlation is only r = 0.149 (cgpa).
+   - Classes overlap heavily: placement depends on unobserved factors
+     (interview performance, company demand, timing), not in the dataset.
+   - ROC-AUC plateaus around 0.68-0.69 even after feature engineering and
+     tuning; accuracy is bounded by the majority class (68.5%) plus the
+     small learnable signal above it.
+   - An always-predict-majority baseline already scores 68.5% accuracy;
+     reported gains must be measured against THAT, not 90%.
+
+9. BACKEND DECISION GUIDE
+   - Use ROC-AUC (ranking quality) as the primary model-selection metric.
+   - Use F1 as the tie-breaker; tune the decision threshold on business
+     priorities (false-hope vs missed placement).
+   - For a recommendation system, calibrated probabilities matter more
+     than raw accuracy - prefer the model with the best ROC-AUC and
+     use threshold + probability outputs in the app.
+
+END OF PHASE 7 SUMMARY

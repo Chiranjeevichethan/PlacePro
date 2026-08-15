@@ -39,6 +39,38 @@ python phase4_model_tuning.py
 
 (`--sample N` runs a quick dev-only smoke test on N rows.)
 
+### Phase 6 (`phase6_dataset_baseline.py`)
+
+- New, cleaner 100k-row dataset: `data/placement_phase6.csv` (18 columns)
+- Leak-free baseline models + stratified 5-fold CV
+
+### Phase 7 (`phase7_model_tuning.py`)
+
+- Deterministic (leak-free) feature engineering on the Phase 6 dataset
+- Tuned Logistic Regression selected as best model (ROC-AUC 0.6853,
+  accuracy 0.6319 — reported honestly, no 90% claim)
+
+### Phase 8 — Final ML pipeline + backend foundation
+
+- **Final pipeline** (`src/pipeline.py`): one reusable prediction function
+  `predict_placement()` returning `placement_probability`, `prediction`
+  (PLACED / NOT PLACED), `confidence`
+- **Training** (`phase8_final_pipeline.py`): reproduces the Phase 7 pipeline
+  exactly and saves it as ONE joblib file `models/placepro_final_model.pkl`
+- **Prediction API** (`backend/`, FastAPI):
+  - `POST /api/predict` — prediction for a raw student profile
+  - `GET /health` — liveness + model version
+  - Interactive docs at `/docs`
+- Full details: `docs/phase8_technical_report.md`
+
+Run Phase 8:
+
+```bash
+python phase8_final_pipeline.py                     # train + save model
+uvicorn backend.app.main:app --reload               # start the API
+python backend/tests/test_predict.py                # smoke tests
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.

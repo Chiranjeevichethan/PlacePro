@@ -1,0 +1,92 @@
+========================================================================
+PHASE 8 - FINAL PIPELINE TRAINING
+========================================================================
+
+Loaded dataset: data/placement_phase6.csv
+Shape: (100000, 18)
+
+Feature engineering applied (Phase 7 rules, deterministic, leak-free).
+Shape after engineering: (100000, 27)
+Engineered features: ['overall_skill_score', 'academic_skill_index', 'experience_score', 'high_cgpa', 'has_internship', 'project_level', 'coding_experience_interaction', 'cgpa_projects_interaction', 'backlog_risk', 'strong_candidate_indicator']
+
+Training rows : 80,000
+Testing rows  : 20,000
+Test set is UNTOUCHED until final evaluation.
+
+Categorical features: ['branch', 'college_tier']
+Numerical features (24): ['cgpa', 'backlogs', 'coding_skills', 'dsa_score', 'aptitude_score', 'communication_skills', 'ml_knowledge', 'system_design', 'internships', 'projects_count', 'certifications', 'hackathons', 'open_source_contributions', 'extracurriculars', 'overall_skill_score', 'academic_skill_index', 'experience_score', 'high_cgpa', 'has_internship', 'project_level', 'coding_experience_interaction', 'cgpa_projects_interaction', 'backlog_risk', 'strong_candidate_indicator']
+========================================================================
+TUNING: Logistic Regression (Phase 7 grid, 3-fold CV)
+========================================================================
+Fitting 3 folds for each of 16 candidates, totalling 48 fits
+
+Best CV ROC-AUC: 0.6855
+Best params: {'model__C': 0.01, 'model__class_weight': 'balanced', 'model__penalty': 'l2', 'model__solver': 'liblinear'}
+========================================================================
+EVALUATION ON UNTOUCHED TEST SET
+========================================================================
+  Accuracy : 0.6319
+  Precision: 0.7956
+  Recall   : 0.6223
+  F1       : 0.6983
+  ROC-AUC  : 0.6853
+
+  Running 5-fold CV on training data...
+  CV Accuracy: 0.6289 +/- 0.0041
+  CV ROC-AUC : 0.6858 +/- 0.0047
+
+Classification report:
+              precision    recall  f1-score   support
+
+  Not Placed       0.44      0.65      0.53      6305
+      Placed       0.80      0.62      0.70     13695
+
+    accuracy                           0.63     20000
+   macro avg       0.62      0.64      0.61     20000
+weighted avg       0.68      0.63      0.64     20000
+
+Confusion matrix:
+[[4115 2190]
+ [5173 8522]]
+========================================================================
+HONEST CROSS-CHECK vs PHASE 7
+========================================================================
+Phase 7 'Logistic Regression Tuned' (recorded in results/phase7_model_comparison.csv):
+  Accuracy : 0.6319
+  Precision: 0.7956
+  Recall   : 0.6223
+  F1       : 0.6983
+  ROC-AUC  : 0.6853
+
+✅ Phase 8 reproduction matches Phase 7 within ±0.005 on every metric - same protocol, same split.
+
+NOTE ON 90% ACCURACY: the untouched test set demonstrates 0.6319 accuracy (63.19%).
+90% accuracy is NOT claimed - it is not achievable on this dataset without leakage or label manipulation (Phase 7, section 8).
+========================================================================
+SAVING FINAL PIPELINE
+========================================================================
+✅ Saved: models/placepro_final_model.pkl
+✅ Saved: results/phase8_model_metrics.csv
+✅ Saved: results/phase8_final_results.txt
+========================================================================
+PREDICTION FUNCTION DEMO (exact output schema)
+========================================================================
+Student 1: prediction=NOT PLACED placement_probability=0.4958 confidence=0.5042 | actual: NOT PLACED
+Student 2: prediction=NOT PLACED placement_probability=0.3816 confidence=0.6184 | actual: PLACED
+Student 3: prediction=PLACED     placement_probability=0.7049 confidence=0.7049 | actual: PLACED
+Student 4: prediction=NOT PLACED placement_probability=0.3293 confidence=0.6707 | actual: NOT PLACED
+Student 5: prediction=PLACED     placement_probability=0.7083 confidence=0.7083 | actual: PLACED
+
+✅ predict_placement() returns the exact Phase 8 output schema
+========================================================================
+PHASE 8 - FINAL PIPELINE TRAINING COMPLETED
+========================================================================
+
+Model saved     : models/placepro_final_model.pkl
+Test accuracy  : 0.6319
+Test ROC-AUC   : 0.6853
+Test F1        : 0.6983
+
+Next: start the backend with
+  uvicorn backend.app.main:app --reload
+then POST a student profile to http://127.0.0.1:8000/api/predict

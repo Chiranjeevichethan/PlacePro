@@ -1,0 +1,13 @@
+PLACEPRO PHASE 7 - CLASSIFICATION REPORT
+============================================================
+
+Best model: Logistic Regression Tuned
+
+              precision    recall  f1-score   support
+
+  Not Placed       0.44      0.64      0.52      6305
+      Placed       0.79      0.62      0.70     13695
+
+    accuracy                           0.63     20000
+   macro avg       0.61      0.63      0.61     20000
+weighted avg       0.68      0.63      0.64     20000

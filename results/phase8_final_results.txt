@@ -1,0 +1,44 @@
+PLACEPRO PHASE 8 - FINAL PIPELINE RESULTS
+==========================================
+
+Dataset          : data/placement_phase6.csv (100,000 rows)
+Target           : placement_status (1 = Placed, 0 = Not Placed)
+Raw features     : 16
+Engineered feats : 10
+Split            : 80/20 stratified, random_state=42 (train 80,000 / test 20,000)
+Best params      : {'model__C': 0.01, 'model__class_weight': 'balanced', 'model__penalty': 'l2', 'model__solver': 'liblinear'}
+
+TEST-SET METRICS (untouched test set)
+-------------------------------------
+  Accuracy  : 0.6319
+  Precision : 0.7956
+  Recall    : 0.6223
+  F1        : 0.6983
+  ROC-AUC   : 0.6853
+
+5-FOLD CV (training data)
+-------------------------
+  Accuracy : 0.6289 +/- 0.0041
+  ROC-AUC  : 0.6858 +/- 0.0047
+
+CLASSIFICATION REPORT
+---------------------
+              precision    recall  f1-score   support
+
+  Not Placed       0.44      0.65      0.53      6305
+      Placed       0.80      0.62      0.70     13695
+
+    accuracy                           0.63     20000
+   macro avg       0.62      0.64      0.61     20000
+weighted avg       0.68      0.63      0.64     20000
+
+CONFUSION MATRIX
+----------------
+[[4115 2190]
+ [5173 8522]]
+
+HONESTY STATEMENT
+-----------------
+Untouched test-set accuracy is 0.6319 (63.19%).
+90% accuracy is NOT claimed - the dataset cannot support it without leakage or label manipulation.
+Phase 7 analysis (results/phase7_validation_summary.txt, section 8) documents why.
