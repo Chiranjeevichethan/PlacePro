@@ -8,7 +8,7 @@
 #
 # ============================================================
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -96,6 +96,13 @@ class ExtractionInfo(BaseModel):
         default=None, description="Page count (PDF only; None for DOCX)"
     )
     extraction_success: bool
+    ocr_required: Optional[bool] = Field(
+        default=False,
+        description=(
+            "True when a PDF contains no extractable text (scanned "
+            "document) - OCR is required; DOCX is never flagged."
+        ),
+    )
 
 
 class Verification(BaseModel):
@@ -116,3 +123,73 @@ class ResumeUploadResponse(BaseModel):
     extraction: ExtractionInfo
     extracted_profile: ExtractedProfile
     verification: Verification
+
+
+# ------------------------------------------------------------
+# PHASE 16 - RESUME INTELLIGENCE 2.0 (additive)
+# ------------------------------------------------------------
+
+
+class FieldEvidence(BaseModel):
+    """Provenance for one extracted field.
+
+    source is "resume" for extraction, "user" after the student
+    edits a field, "calculated" for derived counts, "system" for
+    diagnostics. evidence is a short resume snippet (raw text is
+    never exposed in full).
+    """
+
+    field: str
+    value: Optional[Union[float, int, str]] = None
+    source: str
+    evidence: Optional[str] = None
+
+
+class ResumeDiagnostics(BaseModel):
+    """Resume quality diagnostics (not a claim of accuracy)."""
+
+    page_count: Optional[int] = None
+    word_count: int = 0
+    detected_sections: List[str] = Field(default_factory=list)
+    extraction_completeness: int = 0
+    ocr_required: bool = False
+    scanned_document_warning: bool = False
+
+
+class ExtractionSummary(BaseModel):
+    """What was found: counts + presence flags."""
+
+    fields_extracted: int = 0
+    counts: Dict[str, int] = Field(default_factory=dict)
+    has_education: bool = False
+    has_cgpa: bool = False
+    has_github: bool = False
+    has_linkedin: bool = False
+
+
+class FeatureAvailabilityEntry(BaseModel):
+    """Availability status of one Phase 8 ML feature for this profile.
+
+    AVAILABLE_FROM_RESUME / AVAILABLE_FROM_USER / CALCULATED /
+    REQUIRES_MANUAL_INPUT / UNKNOWN - never invented.
+    """
+
+    field: str
+    status: str
+    reason: str
+
+
+class ResumeAnalysisResponse(BaseModel):
+    """POST /api/resume/analyze - analysis WITHOUT creating a profile."""
+
+    success: bool
+    filename: str
+    file_type: str
+    extraction: ExtractionInfo
+    extracted_profile: ExtractedProfile
+    verification: Verification
+    provenance: List[FieldEvidence] = Field(default_factory=list)
+    confidence: Dict[str, str] = Field(default_factory=dict)
+    diagnostics: ResumeDiagnostics = Field(default_factory=ResumeDiagnostics)
+    extraction_summary: ExtractionSummary = Field(default_factory=ExtractionSummary)
+    completeness: Dict[str, Any] = Field(default_factory=dict)

@@ -14,6 +14,7 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from ..schemas_profile import (
+    ProfileFromResumeResponse,
     ProfilePredictionResponse,
     ProfileResponse,
     StudentProfile,
@@ -22,7 +23,7 @@ from ..services.profile_service import (
     InvalidProfileError,
     ProfileNotFoundError,
     ProfileServiceError,
-    build_draft_from_resume,
+    create_draft_with_analysis,
     get_profile,
     predict_for_profile,
     update_profile,
@@ -40,8 +41,11 @@ DRAFT_MESSAGE = (
 
 @router.post(
     "/from-resume",
-    response_model=ProfileResponse,
-    summary="Create a draft student profile from an uploaded resume",
+    response_model=ProfileFromResumeResponse,
+    summary=(
+        "Create a draft student profile from an uploaded resume "
+        "(with provenance, confidence, diagnostics and completeness)"
+    ),
 )
 async def profile_from_resume(
     file: UploadFile = File(..., description="Resume file (.pdf or .docx)"),
@@ -66,7 +70,7 @@ async def profile_from_resume(
         )
 
     try:
-        profile, completion = build_draft_from_resume(
+        profile, completion, analysis = create_draft_with_analysis(
             filename, content, file.content_type
         )
     except ResumeServiceError as exc:
@@ -78,7 +82,32 @@ async def profile_from_resume(
             status_code=500, detail=f"Profile creation failed: {exc}"
         ) from exc
 
-    return {"profile": profile, "completion": completion, "message": DRAFT_MESSAGE}
+    if analysis.get("diagnostics", {}).get("ocr_required"):
+        # A scanned PDF cannot build a profile - fail loudly instead of
+        # silently returning an empty draft.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "OCR_REQUIRED: the PDF contains no extractable text "
+                "(scanned document). OCR is not implemented yet - no "
+                "profile can be created from this file."
+            ),
+        )
+
+    # Phase 16 additive fields - the original Phase 10 contract
+    # (profile / completion / message) is fully preserved.
+    return {
+        "profile": profile,
+        "completion": completion,
+        "message": DRAFT_MESSAGE,
+        "provenance": analysis["provenance"],
+        "confidence": analysis["confidence"],
+        "diagnostics": analysis["diagnostics"],
+        "extraction_summary": analysis["extraction_summary"],
+        "feature_availability": analysis["completeness"][
+            "feature_availability"
+        ],
+    }
 
 
 @router.post(

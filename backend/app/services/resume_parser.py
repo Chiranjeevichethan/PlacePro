@@ -29,6 +29,12 @@ class ExtractionError(Exception):
     """Raised when text cannot be extracted or parsed."""
 
 
+class NoTextExtractionError(ExtractionError):
+    """The file is structurally valid but contains NO extractable text
+    (e.g. a scanned/image-only PDF). Callers surface this as an
+    OCR_REQUIRED diagnostic instead of a corruption error."""
+
+
 # ------------------------------------------------------------
 # TEXT EXTRACTION
 # ------------------------------------------------------------
@@ -56,7 +62,7 @@ def extract_text_from_pdf(content: bytes) -> dict:
         ) from exc
 
     if not raw_text.strip():
-        raise ExtractionError(
+        raise NoTextExtractionError(
             "No extractable text found in the PDF. "
             "Scanned/image-only PDFs are not supported yet."
         )
@@ -91,7 +97,7 @@ def extract_text_from_docx(content: bytes) -> dict:
     raw_text = "\n".join(parts)
 
     if not raw_text.strip():
-        raise ExtractionError(
+        raise NoTextExtractionError(
             "No extractable text found in the DOCX file."
         )
 

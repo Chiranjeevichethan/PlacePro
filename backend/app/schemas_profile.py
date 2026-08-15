@@ -17,7 +17,7 @@
 #
 # ============================================================
 
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -101,6 +101,15 @@ class StudentProfile(BaseModel):
     achievements: Achievements = Field(default_factory=Achievements)
     ml_inputs: MlInputs = Field(default_factory=MlInputs)
     provenance: Provenance = Field(default_factory=Provenance)
+    original_resume_values: Dict[str, Optional[Union[float, int, str, List]]] = Field(
+        default_factory=dict,
+        description=(
+            "Phase 16: original resume-extracted values (dotted field path "
+            "-> value). When the student edits an extracted field, the new "
+            "value is stored normally with source 'user' and the original "
+            "resume value is kept here for reference."
+        ),
+    )
     verified: bool = False
     prediction_history: List[PredictionHistoryEntry] = Field(default_factory=list)
 
@@ -120,6 +129,18 @@ class ProfileResponse(BaseModel):
     profile: StudentProfile
     completion: ProfileCompletion
     message: str
+
+
+class ProfileFromResumeResponse(ProfileResponse):
+    """Phase 16: from-resume response with the additive Resume
+    Intelligence fields. The Phase 10 contract (profile / completion /
+    message) is fully preserved - the new fields are extra."""
+
+    provenance: List[Dict[str, Any]] = Field(default_factory=list)
+    confidence: Dict[str, str] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    extraction_summary: Dict[str, Any] = Field(default_factory=dict)
+    feature_availability: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class ProfilePredictionResponse(BaseModel):

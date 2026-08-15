@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from .ml_feature_mapping import check_profile_completion
 from .prediction_service import predict as predict_with_model
-from .resume_service import process_resume_upload
+from .resume_service import _process_resume_upload_full
 
 # Project root on sys.path (same pattern as prediction_service)
 PROJECT_ROOT = os.path.dirname(
@@ -154,12 +154,39 @@ def _editable_view(profile: dict) -> dict:
 # ------------------------------------------------------------
 
 
+def _extracted_path_values(extracted: dict) -> dict:
+    """{dotted path: original value} for every non-empty extracted leaf."""
+    values = {}
+    for path in collect_nonempty_paths(extracted):
+        value = _resolve_value(extracted, path)
+        if value is not None:
+            values[path] = value
+    return values
+
+
+def _resolve_value(obj, dotted_path):
+    current = obj
+    for part in dotted_path.split("."):
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+    return current
+
+
 def build_draft_from_resume(filename: str, content: bytes, content_type=None):
     """Run Phase 9 extraction, then build a draft canonical profile.
 
     Returns (profile_dict, completion_dict).
     """
-    extraction_result = process_resume_upload(filename, content, content_type)
+    extraction_result, _ = _process_resume_upload_full(
+        filename, content, content_type
+    )
     extracted = extraction_result["extracted_profile"]
 
     profile = {
@@ -184,6 +211,7 @@ def build_draft_from_resume(filename: str, content: bytes, content_type=None):
             "user": [],
             "ml": [],
         },
+        "original_resume_values": _extracted_path_values(extracted),
         "verified": False,
         "prediction_history": [],
     }
@@ -239,6 +267,15 @@ def verify_profile(submitted: dict):
     # client (it would let a student forge history).
     history = (existing or {}).get("prediction_history", []) if existing else []
 
+    # Phase 16: preserve original resume values when present (the
+    # student's edits stay in the editable sections; the resume originals
+    # are kept server-side for reference, never overwritten silently).
+    originals = (existing or {}).get("original_resume_values", {})
+    if not originals:
+        originals = _extracted_path_values(
+            _editable_view(submitted)
+        ) if not existing else {}
+
     profile = {
         **submitted,
         "profile_id": profile_id or str(uuid.uuid4()),
@@ -247,6 +284,7 @@ def verify_profile(submitted: dict):
             "user": user_paths,
             "ml": [],
         },
+        "original_resume_values": originals,
         "verified": True,
         "prediction_history": history,
     }
@@ -291,6 +329,7 @@ def update_profile(profile_id: str, submitted: dict):
             "user": user_paths,
             "ml": [],
         },
+        "original_resume_values": existing.get("original_resume_values", {}),
         "verified": False,
         "prediction_history": existing.get("prediction_history", []),
     }
@@ -298,6 +337,53 @@ def update_profile(profile_id: str, submitted: dict):
     _save(profile)
     completion = check_profile_completion(profile)
     return profile, completion
+
+
+def create_draft_with_analysis(filename: str, content: bytes, content_type=None):
+    """Phase 16: build a draft profile AND the full intelligence analysis.
+
+    Returns (profile_dict, completion_dict, analysis_dict). The draft
+    is saved (so the student can review/edit/verify it); the analysis
+    is returned to the caller for the enhanced from-resume response.
+    """
+    from .resume_intelligence import build_analysis
+
+    base, full_raw_text = _process_resume_upload_full(
+        filename, content, content_type
+    )
+    extracted = base["extracted_profile"]
+
+    profile = {
+        "profile_id": str(uuid.uuid4()),
+        "personal": {
+            key: extracted.get(key)
+            for key in (
+                "name", "email", "phone", "location",
+                "linkedin", "github", "portfolio",
+            )
+        },
+        "education": extracted.get("education") or {},
+        "skills": extracted.get("skills") or {},
+        "experience": extracted.get("experience") or [],
+        "internships": extracted.get("internships") or [],
+        "projects": extracted.get("projects") or [],
+        "certifications": extracted.get("certifications") or [],
+        "achievements": extracted.get("achievements") or {},
+        "ml_inputs": {},
+        "provenance": {
+            "resume": collect_nonempty_paths(extracted),
+            "user": [],
+            "ml": [],
+        },
+        "original_resume_values": _extracted_path_values(extracted),
+        "verified": False,
+        "prediction_history": [],
+    }
+
+    _save(profile)
+    completion = check_profile_completion(profile)
+    analysis = build_analysis(base, full_raw_text)
+    return profile, completion, analysis
 
 
 # ------------------------------------------------------------

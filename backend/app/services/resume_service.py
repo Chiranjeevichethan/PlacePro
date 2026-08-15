@@ -24,6 +24,7 @@ import uuid
 
 from .resume_parser import (
     ExtractionError,
+    NoTextExtractionError,
     extract_text,
     parse_resume,
 )
@@ -146,6 +147,17 @@ def process_resume_upload(filename: str, content: bytes, content_type=None) -> d
     Returns the ResumeUploadResponse payload (dict). Raises a
     ResumeServiceError subclass on any validation/extraction failure.
     """
+    response, _ = _process_resume_upload_full(filename, content, content_type)
+    return response
+
+
+def _process_resume_upload_full(filename: str, content: bytes, content_type=None):
+    """Like process_resume_upload, but also returns the FULL raw text.
+
+    Returns (response_dict, full_raw_text). The public function above
+    drops the full text (Phase 9 contract); Phase 16's resume
+    intelligence layer needs it for provenance evidence snippets.
+    """
     file_type = validate_upload(filename, content, content_type)
 
     # Temp storage: random name (never the client filename), removed on exit.
@@ -156,16 +168,59 @@ def process_resume_upload(filename: str, content: bytes, content_type=None) -> d
 
         try:
             extraction = extract_text(content, file_type)
+        except NoTextExtractionError as exc:
+            # Structurally valid but contains NO extractable text
+            # (scanned/image-only PDF). Not corruption: report it as
+            # OCR_REQUIRED instead of silently returning an empty
+            # profile or a misleading 422.
+            response = {
+                "success": False,
+                "filename": filename,
+                "file_type": file_type,
+                "extraction": {
+                    "raw_text_preview": "",
+                    "page_count": None,
+                    "extraction_success": False,
+                    "ocr_required": True,
+                },
+                "extracted_profile": {
+                    "name": None, "email": None, "phone": None,
+                    "location": None, "linkedin": None, "github": None,
+                    "portfolio": None,
+                    "education": {"degree": None, "branch": None,
+                                  "college": None, "cgpa": None,
+                                  "graduation_year": None},
+                    "skills": {"programming_languages": [], "frameworks": [],
+                                "databases": [], "cloud": [], "ai_ml": [],
+                                "web_technologies": [], "tools": [],
+                                "other_skills": []},
+                    "experience": [], "internships": [], "projects": [],
+                    "certifications": [],
+                    "achievements": {"hackathons": [], "awards": [],
+                                      "coding_achievements": []},
+                },
+                "verification": {
+                    "confidence": {},
+                    "needs_verification": [],
+                },
+            }
+            return response, ""
         except ExtractionError as exc:
             # A file that passes magic bytes but cannot be parsed
             # (e.g. truncated PDF / damaged DOCX) is a 422, not a 500.
             raise CorruptedFileError(str(exc)) from exc
 
-    profile, confidence, needs_verification = parse_resume(extraction["raw_text"])
+    raw_text = extraction["raw_text"]
+    profile, confidence, needs_verification = parse_resume(raw_text)
 
-    preview = extraction["raw_text"][:500]
+    preview = raw_text[:500]
 
-    return {
+    # ocr_required: a PDF with no extractable text (scanned document).
+    # We surface it explicitly instead of silently returning an empty
+    # profile. DOCX is never flagged (python-docx reads the XML stream).
+    ocr_required = bool(file_type == "pdf" and not raw_text.strip())
+
+    response = {
         "success": True,
         "filename": filename,
         "file_type": file_type,
@@ -173,6 +228,7 @@ def process_resume_upload(filename: str, content: bytes, content_type=None) -> d
             "raw_text_preview": preview,
             "page_count": extraction.get("page_count"),
             "extraction_success": extraction["extraction_success"],
+            "ocr_required": ocr_required,
         },
         "extracted_profile": profile,
         "verification": {
@@ -180,3 +236,4 @@ def process_resume_upload(filename: str, content: bytes, content_type=None) -> d
             "needs_verification": needs_verification,
         },
     }
+    return response, raw_text

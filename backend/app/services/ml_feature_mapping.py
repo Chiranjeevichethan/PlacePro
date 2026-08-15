@@ -143,3 +143,70 @@ def check_profile_completion(profile: dict) -> dict:
         "missing_fields": missing_fields,
         "ml_feature_mapping": mapping,
     }
+
+
+def classify_feature_availability(profile: dict) -> list:
+    """Classify each of the 16 Phase 8 features for a canonical profile.
+
+    Statuses (Phase 16 completeness report):
+      AVAILABLE_FROM_RESUME  - defensible value extracted from the resume
+      AVAILABLE_FROM_USER    - value supplied explicitly by the student
+                               (ml_inputs)
+      CALCULATED             - deterministic count from a profile list
+      REQUIRES_MANUAL_INPUT  - no defensible resume source; needs a
+                               validated score / the student's input
+      UNKNOWN                - no value anywhere (nothing invented)
+
+    Uses the SAME rules as map_profile_to_ml_features - this is a
+    reporting view, never a second mapping implementation.
+    """
+    mapping = map_profile_to_ml_features(profile)
+    education = profile.get("education") or {}
+    ml_inputs = profile.get("ml_inputs") or {}
+
+    statuses = []
+    for feature in RAW_FEATURE_COLUMNS:
+        value = mapping.get(feature)
+        if value is not None:
+            if feature in RESUME_DERIVED_FEATURES:
+                if feature == "branch":
+                    reason = (
+                        f"Branch mapped from the resume to "
+                        f"'{value}' (documented synonym)."
+                    )
+                elif feature == "cgpa":
+                    reason = "CGPA extracted from the resume."
+                else:
+                    reason = f"Counted from the verified profile ({value})."
+                status = "AVAILABLE_FROM_RESUME"
+            else:
+                reason = f"Provided by the student via ml_inputs ({value})."
+                status = "AVAILABLE_FROM_USER"
+        elif feature in MANUAL_INPUT_FEATURES:
+            status = "REQUIRES_MANUAL_INPUT"
+            reason = (
+                "A resume cannot supply a validated value for this field - "
+                "it requires the student's input or an assessment (never "
+                "inferred from skill names)."
+            )
+        elif feature == "branch":
+            status = "REQUIRES_MANUAL_INPUT"
+            raw = (education.get("branch") or "").strip()
+            reason = (
+                f"Branch '{raw}' is not in the documented synonym list - "
+                "select it manually." if raw
+                else "Branch was not found in the profile."
+            )
+        elif feature == "cgpa":
+            status = "REQUIRES_MANUAL_INPUT"
+            reason = "CGPA was not found in the profile."
+        else:
+            status = "UNKNOWN"
+            reason = "No value is available anywhere."
+
+        statuses.append({
+            "field": feature,
+            "status": status,
+            "reason": reason,
+        })
+    return statuses

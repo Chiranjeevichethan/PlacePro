@@ -266,6 +266,37 @@ python phase15_ml_improvement.py                 # full run (~40-60 min)
 python backend/tests/test_phase15_model.py       # 23 checks (needs server for HTTP)
 ```
 
+### Phase 16 — Resume Intelligence 2.0
+
+- **Additive intelligence layer** on top of the Phase 9 extraction:
+  field **provenance** (`{value, source, evidence}`), heuristic
+  **confidence labels** (`high`/`medium`/`low` — extraction
+  confidence, never ML confidence), **resume diagnostics** (pages,
+  words, detected sections, completeness %, OCR flag) and an
+  **extraction summary** (counts + presence flags)
+- **`POST /api/resume/analyze`** (NEW) — full analysis WITHOUT
+  creating a profile (preview before profile creation); scanned PDFs
+  return an explicit **`OCR_REQUIRED`** 422 instead of an empty profile
+- **`POST /api/profile/from-resume`** (ENHANCED, backward compatible) —
+  Phase 10 contract preserved; adds `provenance`, `confidence`,
+  `diagnostics`, `extraction_summary`, `feature_availability`
+- **Feature availability** statuses (AVAILABLE_FROM_RESUME /
+  AVAILABLE_FROM_USER / CALCULATED / REQUIRES_MANUAL_INPUT / UNKNOWN)
+  reuse Phase 10 `ml_feature_mapping` — skills are NEVER converted
+  into numeric scores
+- **Edit provenance**: editing an extracted field marks it `user` and
+  preserves the original resume value in `original_resume_values`
+  (e.g. CGPA 8.1 → edited 8.2 keeps `8.1` server-side)
+- **OCR is not implemented** — scanned PDFs are detected and surfaced
+  explicitly as `OCR_REQUIRED`, never silently ignored
+- Full details: `docs/phase16_resume_intelligence.md`
+
+Run Phase 16:
+
+```bash
+python backend/tests/test_resume_intelligence.py  # 106 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.
