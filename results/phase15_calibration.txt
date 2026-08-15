@@ -1,0 +1,12 @@
+Model: Logistic Regression Tuned
+Brier (validation, raw)      : 0.2239
+Brier (test, raw)            : 0.2241
+Brier (test, Platt/sigmoid)  : 0.1961
+Brier (test, isotonic)       : 0.1962
+Calibration curve (quantile bins, mean predicted vs observed):
+  predicted 0.478 -> observed 0.295
+  predicted 0.607 -> observed 0.421
+  predicted 0.692 -> observed 0.517
+  predicted 0.783 -> observed 0.614
+  predicted 0.863 -> observed 0.751
+

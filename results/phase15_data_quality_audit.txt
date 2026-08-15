@@ -1,0 +1,39 @@
+PLACEPRO PHASE 15 - DATA QUALITY AUDIT
+=====================================
+
+Shape: (100000, 18)
+Missing values per column: {'salary_package_lpa': np.int64(31525)}
+Total missing cells: 31525
+Exact duplicate rows: 0
+Duplicates on features only (ignoring target): 0
+Duplicates on numeric features only: 0
+Constant columns: NONE
+Low-variance numeric (<=2 unique values): ['placement_status', 'high_cgpa', 'has_internship', 'backlog_risk', 'strong_candidate_indicator']
+Columns with impossible values: NONE
+Outliers (1.5x IQR): {'cgpa': 686, 'backlogs': 4981, 'coding_skills': 382, 'aptitude_score': 680, 'communication_skills': 362, 'ml_knowledge': 332, 'system_design': 364, 'certifications': 4946, 'hackathons': 4916, 'overall_skill_score': 619, 'academic_skill_index': 605, 'experience_score': 188, 'coding_experience_interaction': 1537, 'cgpa_projects_interaction': 312}
+Target distribution: placed=0.6847 not_placed=0.3152 (majority-class baseline accuracy = 0.6847)
+branch: {'CSE': np.int64(25046), 'IT': np.int64(16065), 'ECE': np.int64(14939), 'EE': np.int64(12092), 'ME': np.int64(12008), 'CE': np.int64(10024), 'Chemical': np.int64(9826)}
+college_tier: {'Tier-3': np.int64(45222), 'Tier-2': np.int64(39910), 'Tier-1': np.int64(14868)}
+Max train/test mean diff: coding_experience_interaction = 0.0776 (train 12.5478 vs test 12.6254)
+Leakage check:
+  salary_package_lpa present in raw data; missing = 31,525 (31.5%)
+  salary non-missing rate for placed: 1.0000 for not-placed: 0.0000
+  -> salary is POST-PLACEMENT information (only present for placed students) = PURE LEAKAGE; dropped by create_features() and NEVER used.
+Feature-target correlations (point-biserial for numeric):
+  academic_skill_index         r = +0.1724
+  cgpa                         r = +0.1489
+  coding_experience_interaction r = +0.1253
+  experience_score             r = +0.1241
+  high_cgpa                    r = +0.1193
+  -> strongest |r| = 0.1724 (academic_skill_index) - far below what would be needed for high accuracy classification
+Synthetic-data artifact checks:
+  CGPA decimal lengths: {2: np.int64(89766), 1: np.int64(10234)}
+  internships value counts: {0: np.int64(30060), 1: np.int64(40220), 2: np.int64(19876), 3: np.int64(9844)}
+  projects_count value counts: {0: np.int64(5021), 1: np.int64(20127), 2: np.int64(29986), 3: np.int64(24872), 4: np.int64(14957), 5: np.int64(5037)}
+  certifications value counts: {0: np.int64(19778), 1: np.int64(35292), 2: np.int64(25043), 3: np.int64(14941), 4: np.int64(4946)}
+  hackathons value counts: {0: np.int64(50111), 1: np.int64(30110), 2: np.int64(14863), 3: np.int64(4916)}
+Target rate by key columns (evidence of weak signal):
+  placed-rate by cgpa quartile: [np.float64(0.594), np.float64(0.663), np.float64(0.711), np.float64(0.772)]
+  placed-rate by internships quartile: [np.float64(0.659), np.float64(0.732), np.float64(0.772)]
+  placed-rate by projects_count quartile: [np.float64(0.644), np.float64(0.675), np.float64(0.699), np.float64(0.734)]
+  placed-rate by backlogs quartile: [np.float64(0.695), np.float64(0.625)]

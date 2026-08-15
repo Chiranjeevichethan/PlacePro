@@ -234,6 +234,38 @@ uvicorn backend.app.main:app --reload
 python backend/tests/test_recommendations.py        # 105 checks (needs server for HTTP)
 ```
 
+### Phase 15 — ML model improvement & robust evaluation
+
+- `phase15_ml_improvement.py` — full data-quality audit, exact Phase 8
+  baseline reproduction, stronger models (tuned XGBoost, Extra Trees,
+  HistGradientBoosting), feature-engineering experiments, feature
+  selection, class-imbalance handling, threshold analysis,
+  calibration, 5-fold CV confidence, overfitting check, explainability
+  (all Windows-safe, `n_jobs=1`, untouched 80/20 stratified test set,
+  `random_state=42`)
+- **Honest result: NO material improvement found.** Tuned Logistic
+  Regression keeps the best ROC-AUC (**0.6853**) and reproduces Phase 8
+  exactly; HGB wins accuracy/F1 (0.6977 / 0.8100) but with a **lower**
+  ROC-AUC (0.6829) — the same tradeoff Phase 6 observed
+- **90% accuracy: NOT achievable** on this dataset (best honest accuracy
+  ≈ 69.8%, majority baseline 68.5%, strongest correlation |r| ≤ 0.17,
+  heavy class overlap) — no leakage, no label manipulation
+- F1-optimal threshold **0.25** lifts F1 0.698 → 0.815 and accuracy
+  0.632 → 0.696 (decision-only improvement; ROC-AUC unchanged);
+  calibration (Brier 0.224 → 0.196) documented
+- Saved `models/placepro_phase15_best_model.pkl` + metadata as an
+  **evaluation artifact** — the production model
+  (`models/placepro_final_model.pkl`) was **NOT replaced** (explicit
+  decision, never silent)
+- Full details: `docs/phase15_ml_model_improvement.md`
+
+Run Phase 15:
+
+```bash
+python phase15_ml_improvement.py                 # full run (~40-60 min)
+python backend/tests/test_phase15_model.py       # 23 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.

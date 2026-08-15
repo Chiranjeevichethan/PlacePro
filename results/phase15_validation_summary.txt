@@ -1,0 +1,25 @@
+PLACEPRO PHASE 15 - VALIDATION SUMMARY
+=====================================
+
+Data quality audit: see phase15_data_quality_audit.txt
+Model comparison  : see phase15_model_comparison.csv
+CV results        : see phase15_cv_results.csv
+Threshold analysis: see phase15_threshold_analysis.csv
+Calibration       : see phase15_calibration.txt
+
+KEY FINDINGS
+------------
+- Best test ROC-AUC across all candidates: 0.6853
+- Best test accuracy: 0.6977 (69.8%)
+- Majority-class baseline: 0.6847
+- 90% accuracy: NOT achievable without leakage or label manipulation.
+- Selected Phase 15 candidate: Logistic Regression Tuned
+    Accuracy: 0.6319
+    Precision: 0.7956
+    Recall: 0.6223
+    F1: 0.6983
+    ROC-AUC: 0.6853
+    PR-AUC: 0.8174
+    Balanced Accuracy: 0.6375
+    Brier: 0.2241
+- Production model NOT replaced (explicit decision required).
