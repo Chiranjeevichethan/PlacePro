@@ -203,6 +203,37 @@ uvicorn backend.app.main:app --reload
 python backend/tests/test_eligibility.py            # 74 checks (needs server for HTTP)
 ```
 
+### Phase 14 — Company recommendation engine
+
+- **`GET /api/profile/{id}/recommendations[?limit=N]`** — ranks every active
+  demo company for a **verified** profile using five transparent signals:
+  eligibility (30), skill match (25), readiness (20), model-estimated
+  placement probability (15), profile completeness (10) — a documented
+  0-100 weighted formula, **not** an ML probability
+- Results grouped into `recommended` / `eligible` / `incomplete` /
+  `not_recommended`, each sorted by score descending
+- **Eligibility override**: mandatory failures force `NOT_RECOMMENDED` and
+  missing information forces `INCOMPLETE` — an ineligible company can never
+  become recommended just because its number looks high
+- Every item explains itself: reasons (e.g. *"Not recommended because Your
+  CGPA is 6.8, while the minimum requirement is 7.5"*), skill match
+  breakdown, and improvement actions (*"Strengthen Data Structures
+  knowledge"*)
+- Honesty: probability is always labeled *"Model-estimated placement
+  probability"* — never "you will get this company"; missing ML features
+  are never invented (probability simply absent)
+- Reuses Phase 13 eligibility, Phase 12 readiness + taxonomy, and the
+  Phase 8 model via the Phase 10 mapping (read-only view — no prediction
+  history written); `?limit=` validated 1-50
+- Full details: `docs/phase14_company_recommendation.md`
+
+Run Phase 14:
+
+```bash
+uvicorn backend.app.main:app --reload
+python backend/tests/test_recommendations.py        # 105 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.
