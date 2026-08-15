@@ -1,0 +1,112 @@
+# ============================================================
+# PLACEPRO - PHASE 10 - CANONICAL STUDENT PROFILE SCHEMAS
+# ============================================================
+#
+# ONE canonical internal student profile. It clearly separates:
+#
+#   A. resume_extracted  -> provenance.resume  (from the resume)
+#   B. user_provided     -> provenance.user   (student edited / typed)
+#   C. ml_derived        -> provenance.ml     (RESERVED for Phase 11+
+#                                             model outputs; empty now)
+#
+# Rules:
+#   - Missing information stays null / [] - never invented.
+#   - `verified` is only True after the student explicitly confirms
+#     the profile (POST /api/profile/verify).
+#   - Editing a verified profile resets `verified` to False.
+#
+# ============================================================
+
+from typing import Dict, List, Optional, Union
+
+from pydantic import BaseModel, Field
+
+# Reuse the Phase 9 structures (no duplicate schema definitions)
+from .schemas_resume import (
+    Achievements,
+    CertificationEntry,
+    ExperienceEntry,
+    InternshipEntry,
+    ProjectEntry,
+    SkillSet,
+)
+
+
+class PersonalInfo(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    linkedin: Optional[str] = None
+    github: Optional[str] = None
+    portfolio: Optional[str] = None
+
+
+class EducationInfo(BaseModel):
+    degree: Optional[str] = None
+    branch: Optional[str] = None
+    college: Optional[str] = None
+    cgpa: Optional[float] = None
+    graduation_year: Optional[int] = None
+
+
+class MlInputs(BaseModel):
+    """User-provided ML feature values that a resume cannot supply.
+
+    These are the Phase 8 model features with no defensible resume
+    source (scores, tier, backlogs, etc.). The student provides them
+    manually; the mapping layer never invents them.
+    """
+
+    college_tier: Optional[str] = None  # Tier-1 / Tier-2 / Tier-3
+    backlogs: Optional[int] = None
+    coding_skills: Optional[float] = None
+    dsa_score: Optional[float] = None
+    aptitude_score: Optional[float] = None
+    communication_skills: Optional[float] = None
+    ml_knowledge: Optional[float] = None
+    system_design: Optional[float] = None
+    open_source_contributions: Optional[int] = None
+    extracurriculars: Optional[int] = None
+
+
+class Provenance(BaseModel):
+    """Where each non-empty profile value came from (dotted field paths)."""
+
+    resume: List[str] = Field(default_factory=list)
+    user: List[str] = Field(default_factory=list)
+    ml: List[str] = Field(default_factory=list)
+
+
+class StudentProfile(BaseModel):
+    """The canonical unified student profile."""
+
+    profile_id: Optional[str] = None
+    personal: PersonalInfo = Field(default_factory=PersonalInfo)
+    education: EducationInfo = Field(default_factory=EducationInfo)
+    skills: SkillSet = Field(default_factory=SkillSet)
+    experience: List[ExperienceEntry] = Field(default_factory=list)
+    internships: List[InternshipEntry] = Field(default_factory=list)
+    projects: List[ProjectEntry] = Field(default_factory=list)
+    certifications: List[CertificationEntry] = Field(default_factory=list)
+    achievements: Achievements = Field(default_factory=Achievements)
+    ml_inputs: MlInputs = Field(default_factory=MlInputs)
+    provenance: Provenance = Field(default_factory=Provenance)
+    verified: bool = False
+
+
+class ProfileCompletion(BaseModel):
+    """Readiness of the profile for the Phase 8 model (informational only
+    in Phase 10 - no prediction is made yet)."""
+
+    profile_complete: bool
+    missing_fields: List[str] = Field(default_factory=list)
+    ml_feature_mapping: Dict[str, Optional[Union[float, int, str]]] = Field(
+        default_factory=dict
+    )
+
+
+class ProfileResponse(BaseModel):
+    profile: StudentProfile
+    completion: ProfileCompletion
+    message: str

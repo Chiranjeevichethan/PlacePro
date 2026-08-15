@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes.predict import router as predict_router
 from .routes.resume import router as resume_router
+from .routes.profile import router as profile_router
 from src.pipeline import MODEL_VERSION
 
 app = FastAPI(
@@ -37,6 +38,7 @@ app.add_middleware(
 
 app.include_router(predict_router)
 app.include_router(resume_router)
+app.include_router(profile_router)
 
 
 @app.get("/health", tags=["health"])

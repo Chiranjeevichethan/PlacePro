@@ -93,6 +93,33 @@ python backend/tests/test_resume.py                 # 82 checks (needs server fo
 curl -X POST http://127.0.0.1:8000/api/resume/upload -F "file=@resume.pdf;type=application/pdf"
 ```
 
+### Phase 10 — Resume → verified student profile
+
+- **Canonical profile** (`backend/app/schemas_profile.py`) with clear
+  provenance separation: `provenance.resume` (extracted), `provenance.user`
+  (student-edited), `provenance.ml` (reserved for Phase 11)
+- New endpoints:
+  - `POST /api/profile/from-resume` — resume → draft profile (not verified)
+  - `PUT /api/profile/{id}` — student edits (reset `verified` to false)
+  - `POST /api/profile/verify` — explicit confirmation (`verified: true`)
+  - `GET /api/profile/{id}` — fetch a stored profile
+- **ML feature mapping** (`backend/app/services/ml_feature_mapping.py`):
+  maps the verified profile to the exact 16 Phase 8 model inputs using only
+  defensible relationships (cgpa, branch synonyms, list counts); the other
+  10 features are user-provided via `ml_inputs` — **nothing is invented**
+  (skills are never converted into scores)
+- **Completion check**: `profile_complete` + `missing_fields` tells the
+  frontend what the student still needs to enter
+- No prediction yet — Phase 11 wires the verified profile to the model
+- Full details: `docs/phase10_verified_student_profile.md`
+
+Run Phase 10:
+
+```bash
+uvicorn backend.app.main:app --reload
+python backend/tests/test_profile.py                # 69 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.
