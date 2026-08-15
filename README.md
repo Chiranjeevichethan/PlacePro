@@ -171,6 +171,38 @@ uvicorn backend.app.main:app --reload
 python backend/tests/test_readiness.py              # 82 checks (needs server for HTTP)
 ```
 
+### Phase 13 — Company eligibility engine
+
+- **`GET /api/companies`** and **`GET /api/companies/{id}`** — list / inspect
+  the configured demo companies (7 active, clearly labeled **SAMPLE / DEMO**
+  requirements; the inactive example `ArchiveTech` demonstrates the `active`
+  flag and is excluded)
+- **`GET /api/profile/{id}/eligibility/{company_id}`** — transparent
+  PASS/FAIL/UNKNOWN analysis of a **verified** profile against one company:
+  requirements satisfied / not satisfied, missing information, reasons and
+  optional improvement actions
+- **`GET /api/profile/{id}/eligibility`** — eligibility against all active
+  companies, grouped into `eligible` / `not_eligible` / `incomplete` with
+  pass/fail/unknown counts and major reasons
+- Honesty rules: missing data is **UNKNOWN, never failure** (missing CGPA →
+  `INCOMPLETE`, not "not eligible"); a missing required skill is "not found
+  in the verified profile" + "add verified evidence" action — never "the
+  student doesn't know it"; **preferred skills never block eligibility**
+- **Eligibility is NOT the ML probability** — it is driven only by company
+  requirements; placement prediction and eligibility are separate systems
+- Reuses the Phase 12 skill taxonomy/normalization and the Phase 10
+  ML-feature mapping (no duplicate implementations)
+- Company requirements are server-side config only (`backend/app/data/
+  companies.py`) — clients cannot modify them
+- Full details: `docs/phase13_company_eligibility.md`
+
+Run Phase 13:
+
+```bash
+uvicorn backend.app.main:app --reload
+python backend/tests/test_eligibility.py            # 74 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.

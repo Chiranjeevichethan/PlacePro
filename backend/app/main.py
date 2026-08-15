@@ -19,6 +19,7 @@ from .routes.predict import router as predict_router
 from .routes.resume import router as resume_router
 from .routes.profile import router as profile_router
 from .routes.readiness import router as readiness_router
+from .routes.eligibility import router as eligibility_router
 from src.pipeline import MODEL_VERSION
 
 app = FastAPI(
@@ -41,6 +42,7 @@ app.include_router(predict_router)
 app.include_router(resume_router)
 app.include_router(profile_router)
 app.include_router(readiness_router)
+app.include_router(eligibility_router)
 
 
 @app.get("/health", tags=["health"])
