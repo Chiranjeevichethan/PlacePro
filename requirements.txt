@@ -7,3 +7,6 @@ xgboost
 joblib
 fastapi
 uvicorn
+python-multipart
+pypdf
+python-docx

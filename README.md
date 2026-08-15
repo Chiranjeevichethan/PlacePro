@@ -71,6 +71,28 @@ uvicorn backend.app.main:app --reload               # start the API
 python backend/tests/test_predict.py                # smoke tests
 ```
 
+### Phase 9 — Resume upload & intelligent extraction
+
+- **`POST /api/resume/upload`** (multipart, field `file`) accepts **PDF**
+  (pypdf) and **DOCX** (python-docx) resumes and returns a structured
+  student profile (personal, education, skills, experience, internships,
+  projects, certifications, achievements) plus heuristic extraction
+  confidence and a `needs_verification` list
+- **Never invents data**: missing fields are `null`/`[]`; skills are
+  returned as found, never converted into scores
+- **Secure handling**: 5 MB limit, magic-byte + MIME validation, temp
+  storage with cleanup, no execution, no persistence, no auth yet
+- Resume extraction is **not yet wired to ML prediction** (Phase 10)
+- Full details: `docs/phase9_resume_extraction.md`
+
+Run Phase 9:
+
+```bash
+uvicorn backend.app.main:app --reload               # start the API
+python backend/tests/test_resume.py                 # 82 checks (needs server for HTTP)
+curl -X POST http://127.0.0.1:8000/api/resume/upload -F "file=@resume.pdf;type=application/pdf"
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.

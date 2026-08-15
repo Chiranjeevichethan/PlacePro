@@ -1,0 +1,65 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1806 >>
+stream
+BT /F1 11 Tf 60 760 Td (John Doe) Tj ET
+BT /F1 11 Tf 60 744 Td (Bengaluru, Karnataka) Tj ET
+BT /F1 11 Tf 60 728 Td (john.doe@gmail.com) Tj ET
+BT /F1 11 Tf 60 712 Td (+91 98765 43210) Tj ET
+BT /F1 11 Tf 60 696 Td (linkedin.com/in/johndoe) Tj ET
+BT /F1 11 Tf 60 680 Td (github.com/johndoe) Tj ET
+BT /F1 11 Tf 60 664 Td () Tj ET
+BT /F1 11 Tf 60 648 Td (EDUCATION) Tj ET
+BT /F1 11 Tf 60 632 Td (B.Tech in Computer Science, IIT Delhi, CGPA: 8.2, 2022-2026) Tj ET
+BT /F1 11 Tf 60 616 Td () Tj ET
+BT /F1 11 Tf 60 600 Td (SKILLS) Tj ET
+BT /F1 11 Tf 60 584 Td (Python, Java, SQL, Django, React, MySQL, AWS, Docker, Git, TensorFlow) Tj ET
+BT /F1 11 Tf 60 568 Td () Tj ET
+BT /F1 11 Tf 60 552 Td (EXPERIENCE) Tj ET
+BT /F1 11 Tf 60 536 Td (Software Engineer, Google, 2022-2024) Tj ET
+BT /F1 11 Tf 60 520 Td (- Built scalable microservices) Tj ET
+BT /F1 11 Tf 60 504 Td (Technologies: Python, Go, Kubernetes) Tj ET
+BT /F1 11 Tf 60 488 Td () Tj ET
+BT /F1 11 Tf 60 472 Td (INTERNSHIPS) Tj ET
+BT /F1 11 Tf 60 456 Td (Summer Intern, Microsoft, 2023) Tj ET
+BT /F1 11 Tf 60 440 Td (- Worked on Azure cloud features) Tj ET
+BT /F1 11 Tf 60 424 Td () Tj ET
+BT /F1 11 Tf 60 408 Td (PROJECTS) Tj ET
+BT /F1 11 Tf 60 392 Td (- Project Alpha - A web dashboard for analytics) Tj ET
+BT /F1 11 Tf 60 376 Td (  Technologies: React, Node.js, MongoDB) Tj ET
+BT /F1 11 Tf 60 360 Td (- Project Beta - An ML chatbot) Tj ET
+BT /F1 11 Tf 60 344 Td (  Technologies: Python, TensorFlow) Tj ET
+BT /F1 11 Tf 60 328 Td () Tj ET
+BT /F1 11 Tf 60 312 Td (CERTIFICATIONS) Tj ET
+BT /F1 11 Tf 60 296 Td (AWS Certified Solutions Architect, Amazon, 2023) Tj ET
+BT /F1 11 Tf 60 280 Td () Tj ET
+BT /F1 11 Tf 60 264 Td (ACHIEVEMENTS) Tj ET
+BT /F1 11 Tf 60 248 Td (- Winner, Smart India Hackathon 2024) Tj ET
+BT /F1 11 Tf 60 232 Td (- LeetCode rating 1800) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000002099 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2169
+%%EOF
