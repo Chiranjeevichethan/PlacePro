@@ -363,6 +363,16 @@ def compute_readiness_score(profile: dict, skill_entries: list) -> dict:
         completeness["percentage"] / 100 * READINESS_WEIGHTS["profile_completeness"]
     )
 
+    # PHASE 17 - assessment evidence bonus (documented, capped).
+    # Verified assessment scores strengthen the technical component:
+    #   bonus = ASSESSMENT_READINESS_BONUS_MAX * (avg latest score / 100)
+    # Only the LATEST score per skill counts (repeated attempts can
+    # not inflate the bonus - a student who retries and scores lower
+    # gets the lower latest score, and the bonus is capped at 5 pts).
+    assessment_bonus = _assessment_bonus(profile)
+    technical = min(technical + assessment_bonus,
+                    READINESS_WEIGHTS["technical_skills"])
+
     breakdown = {
         "technical_skills": technical,
         "projects": projects,
@@ -373,6 +383,23 @@ def compute_readiness_score(profile: dict, skill_entries: list) -> dict:
     }
     score = min(100, sum(breakdown.values()))
     return {"readiness_score": score, "breakdown": breakdown}
+
+
+def _assessment_bonus(profile: dict) -> float:
+    """Capped readiness bonus from verified assessment evidence.
+
+    Uses the LATEST score per assessed skill only; scores below 60
+    (Developing/Beginner) contribute 0. Documented in
+    docs/phase17_skill_assessment.md.
+    """
+    from .assessment_service import ASSESSMENT_READINESS_BONUS_MAX, get_assessment_evidence
+
+    latest = get_assessment_evidence(profile)
+    qualifying = [e["score"] for e in latest if (e.get("score") or 0) >= 60]
+    if not qualifying:
+        return 0.0
+    avg = sum(qualifying) / len(qualifying)
+    return round(min(ASSESSMENT_READINESS_BONUS_MAX, avg / 100 * ASSESSMENT_READINESS_BONUS_MAX), 1)
 
 
 def readiness_level(score: int) -> str:

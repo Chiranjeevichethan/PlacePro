@@ -267,6 +267,13 @@ def verify_profile(submitted: dict):
     # client (it would let a student forge history).
     history = (existing or {}).get("prediction_history", []) if existing else []
 
+    # Phase 17: assessment evidence is server-controlled too (scores are
+    # produced by the assessment engine, never by the client).
+    assessment_evidence = (
+        (existing or {}).get("assessment_evidence", [])
+        if existing else []
+    )
+
     # Phase 16: preserve original resume values when present (the
     # student's edits stay in the editable sections; the resume originals
     # are kept server-side for reference, never overwritten silently).
@@ -285,6 +292,7 @@ def verify_profile(submitted: dict):
             "ml": [],
         },
         "original_resume_values": originals,
+        "assessment_evidence": assessment_evidence,
         "verified": True,
         "prediction_history": history,
     }
@@ -320,7 +328,8 @@ def update_profile(profile_id: str, submitted: dict):
         if p not in user_paths
     ]
 
-    # prediction_history is server-controlled (never from the client)
+    # prediction_history and assessment_evidence are server-controlled
+    # (never from the client)
     profile = {
         **submitted,
         "profile_id": profile_id,
@@ -330,6 +339,7 @@ def update_profile(profile_id: str, submitted: dict):
             "ml": [],
         },
         "original_resume_values": existing.get("original_resume_values", {}),
+        "assessment_evidence": existing.get("assessment_evidence", []),
         "verified": False,
         "prediction_history": existing.get("prediction_history", []),
     }

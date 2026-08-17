@@ -110,6 +110,15 @@ class StudentProfile(BaseModel):
             "resume value is kept here for reference."
         ),
     )
+    assessment_evidence: List[Dict[str, Optional[Union[float, int, str, bool]]]] = Field(
+        default_factory=list,
+        description=(
+            "Phase 17: verified assessment evidence (server-produced only). "
+            "Each entry: {skill, score, level, source: 'assessment', "
+            "verified: true, assessment_id, attempt, timestamp}. Clients "
+            "can never write this - scores come from the assessment engine."
+        ),
+    )
     verified: bool = False
     prediction_history: List[PredictionHistoryEntry] = Field(default_factory=list)
 

@@ -91,22 +91,40 @@ class RecommendationServiceError(Exception):
 # ------------------------------------------------------------
 
 
-def compute_skill_match(company: dict, present_skills: set) -> dict:
+def compute_skill_match(company: dict, present_skills: set,
+                        assessed: dict = None) -> dict:
     """Required/preferred skill match for one company.
+
+    assessed: {skill: {score, ...}} - Phase 17 verified assessment
+    evidence. When a skill HAS an assessment, the assessment is the
+    PRIMARY evidence: a required skill counts as matched only when
+    the score is >= ASSESSMENT_SATISFIED_MIN_SCORE (Intermediate+).
+    A resume mention alone no longer satisfies a required skill once
+    an assessment exists (the student may have listed it but scored
+    below the threshold). Skills without any assessment fall back to
+    the verified-skill set (resume/user mentions).
 
     Returns {score, required_matched, required_missing,
              preferred_matched, preferred_missing}. Score is
       round((0.75 * required_fraction + 0.25 * preferred_fraction) * 100, 1)
     with a fraction of 1.0 when a category has no skills configured.
     """
+    from .assessment_service import ASSESSMENT_SATISFIED_MIN_SCORE
+
+    assessed = assessed or {}
     requirements = company.get("requirements") or {}
     required = list(requirements.get("required_skills") or [])
     preferred = list(requirements.get("preferred_skills") or [])
 
-    required_matched = [s for s in required if s in present_skills]
-    required_missing = [s for s in required if s not in present_skills]
-    preferred_matched = [s for s in preferred if s in present_skills]
-    preferred_missing = [s for s in preferred if s not in present_skills]
+    def satisfied(skill):
+        if skill in assessed:
+            return (assessed[skill].get("score") or 0) >= ASSESSMENT_SATISFIED_MIN_SCORE
+        return skill in present_skills
+
+    required_matched = [s for s in required if satisfied(s)]
+    required_missing = [s for s in required if not satisfied(s)]
+    preferred_matched = [s for s in preferred if satisfied(s)]
+    preferred_missing = [s for s in preferred if not satisfied(s)]
 
     required_fraction = (
         len(required_matched) / len(required) if required else 1.0
@@ -236,10 +254,15 @@ def _require_verified(profile) -> None:
 
 
 def build_recommendation(profile, company, readiness, placement_probability,
-                         present_skills) -> dict:
-    """One company's recommendation for a verified profile."""
+                         present_skills, assessed=None) -> dict:
+    """One company's recommendation for a verified profile.
+
+    `assessed` is the Phase 17 verified assessment evidence
+    ({skill: {score, ...}}); when present it becomes the primary
+    evidence for skill matching (see compute_skill_match).
+    """
     eligibility = evaluate_company_eligibility(profile, company)
-    skill_match = compute_skill_match(company, present_skills)
+    skill_match = compute_skill_match(company, present_skills, assessed)
 
     readiness_score = readiness["readiness_score"]
     completeness_pct = readiness["profile_completeness"]["percentage"]
@@ -314,12 +337,19 @@ def get_recommendations(profile_id: str, limit=None) -> dict:
     placement_probability = _placement_probability(profile)
     present_skills = {e["skill"] for e in collect_verified_skills(profile)}
 
+    # Phase 17: verified assessment evidence (latest score per skill)
+    from .assessment_service import get_assessment_evidence
+
+    assessed = {
+        e["skill"]: e for e in get_assessment_evidence(profile)
+    }
+
     grouped = {"recommended": [], "eligible": [],
                "incomplete": [], "not_recommended": []}
     for company in get_active_companies():
         item = build_recommendation(
             profile, company, readiness, placement_probability,
-            present_skills,
+            present_skills, assessed,
         )
         grouped[item["status"].lower()].append(item)
 

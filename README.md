@@ -297,6 +297,41 @@ Run Phase 16:
 python backend/tests/test_resume_intelligence.py  # 106 checks (needs server for HTTP)
 ```
 
+### Phase 17 — Skill assessment engine
+
+- **Real, evidence-based skill assessment** — a resume mention is NOT a
+  skill score; a numerical score comes ONLY from an actual assessment,
+  evaluated **server-side** (answer keys never leave the server)
+- **144 questions / 12 skills** (Python, Java, C, C++, JavaScript, SQL,
+  Data Structures, Algorithms, React, Machine Learning, HTML/CSS, Git),
+  EASY/MEDIUM/HARD weighted by difficulty points (1/2/3), with
+  per-topic and per-difficulty breakdowns
+- **`POST /api/assessment/start`** (questions, never answers) →
+  **`POST /api/assessment/{id}/submit`** (server-side scoring →
+  verified evidence `{skill, score, level, source: "assessment",
+  verified: true}`) — plus `GET /api/assessment/{id}`,
+  `GET /api/profile/{id}/assessments`, `GET /api/profile/{id}/skills`
+- **Provenance preserved**: resume (`source=resume`, verified=false) and
+  assessment (`source=assessment`, verified=true) evidence coexist on
+  the profile; resume evidence is never overwritten
+- **Attempt limits** (3/skill) + **24 h cooldown**, configurable;
+  repeated attempts cannot inflate readiness (only the latest score
+  counts, bonus capped at 5 pts)
+- **Readiness (Phase 12):** documented capped assessment bonus;
+  **Recommendations (Phase 14):** an assessed skill is the primary
+  evidence — scoring below 60 means it does NOT satisfy a company's
+  required skill even if the resume lists it
+- **Honest limitation**: scores reflect performance on the PlacePro
+  question bank, not a validated psychometric test — never presented
+  as guaranteed real-world expertise
+- Full details: `docs/phase17_skill_assessment.md`
+
+Run Phase 17:
+
+```bash
+python backend/tests/test_assessment.py  # 85 checks (needs server for HTTP)
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.
