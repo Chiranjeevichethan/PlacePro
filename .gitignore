@@ -18,6 +18,9 @@ outputs/*.jpeg
 # Student profile store (user data - never committed)
 data/profiles/
 
+# Assessment sessions (user data - never committed)
+data/assessments/
+
 # OS
 .DS_Store
 Thumbs.db

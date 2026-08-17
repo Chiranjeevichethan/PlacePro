@@ -332,6 +332,39 @@ Run Phase 17:
 python backend/tests/test_assessment.py  # 85 checks (needs server for HTTP)
 ```
 
+### Phase 18 — Student dashboard (React frontend)
+
+- **Professional, responsive Student Dashboard** bringing the complete
+  student workflow into ONE interface: resume upload → profile review →
+  verification → prediction → readiness → skill assessment → companies →
+  recommendations → improvement plan
+- **Pure frontend phase**: consumes ONLY the existing Phase 8–17 APIs;
+  no backend business logic changed, no endpoints added/removed, ML
+  pipeline files untouched
+- **React + Vite + TypeScript** under `frontend/`, with a dedicated API
+  service layer (`src/api/`), centralized response types (`src/types/`),
+  `VITE_API_URL` for the backend URL (never hard-coded), loading/
+  error/empty states, retry buttons, toasts, confirmation dialogs and a
+  mobile-first responsive layout (sidebar collapses to a hamburger
+  top bar)
+- **Honest presentation**: ML placement probability is always labeled
+  "model-estimated" and never merged with the rule-based readiness
+  score; missing skills are reported as "not found in verified profile";
+  demo company requirements are labeled sample data
+- **Demo mode (no auth yet)**: a development `profile_id` is isolated in
+  `frontend/src/config/demo.ts` (`VITE_DEMO_PROFILE_ID`); seed a verified,
+  ML-complete demo profile with `python backend/scripts/seed_demo_profile.py`
+  (optional `--assess-all` also seeds demo assessment evidence)
+- Full details: `docs/phase18_student_dashboard.md`
+
+Run Phase 18:
+
+```bash
+uvicorn backend.app.main:app --reload       # backend on :8000
+python backend/scripts/seed_demo_profile.py # demo profile (dev tool)
+cd frontend && npm install && npm run dev    # dashboard on :5173
+```
+
 ## Dataset
 
 The project uses a student placement dataset containing academic, technical, behavioral and extracurricular attributes.
