@@ -214,20 +214,40 @@ DATE_RANGE_RE = re.compile(
 )
 
 DEGREE_RE = re.compile(
-    r"\b(B\.?Tech|B\.?E|M\.?Tech|M\.?E|B\.?Sc|M\.?Sc|B\.?A|M\.?A|MBA|PGDM|PhD|"
-    r"BCA|MCA|BBA|B\.?Com|M\.?Com|B\.?Arch|M\.?Arch|B\.?Pharm|M\.?Pharm|Diploma|"
-    r"Bachelor(?:'s)? of (?:Technology|Engineering|Science|Arts|Business Administration|Computer Applications|Commerce)|"
-    r"Master(?:'s)? of (?:Technology|Engineering|Science|Arts|Business Administration|Computer Applications|Commerce))",
+    r"\b(?:Bachelor(?:'s)? of (?:Technology|Engineering|Science|Arts|Business Administration|Computer Applications|Commerce)|"
+    r"Master(?:'s)? of (?:Technology|Engineering|Science|Arts|Business Administration|Computer Applications|Commerce)|"
+    r"B\.?Tech|B\.?E|M\.?Tech|M\.?E|B\.?Sc|M\.?Sc|B\.?A|M\.?A|MBA|PGDM|PhD|"
+    r"BCA|MCA|BBA|B\.?Com|M\.?Com|B\.?Arch|M\.?Arch|B\.?Pharm|M\.?Pharm|Diploma)\b",
     re.IGNORECASE,
 )
 
 BRANCH_KEYWORDS = [
-    "Computer Science", "Information Technology", "Information Science",
-    "Electronics and Communication", "Electronics", "Electrical", "Mechanical",
-    "Civil", "Chemical", "Artificial Intelligence", "Data Science",
-    "Machine Learning", "Cyber Security", "Computer Engineering",
-    "Software Engineering", "Instrumentation", "Biotechnology", "Automobile",
-    "Aerospace", "ECE", "CSE", "EEE", "IT", "AIML", "AI & ML",
+    "Information Science and Engineering",
+    "Electronics and Communication",
+    "Artificial Intelligence",
+    "Data Science",
+    "Machine Learning",
+    "Cyber Security",
+    "Computer Engineering",
+    "Software Engineering",
+    "Computer Science",
+    "Information Technology",
+    "Information Science",
+    "Electronics",
+    "Electrical",
+    "Mechanical",
+    "Civil",
+    "Chemical",
+    "Instrumentation",
+    "Biotechnology",
+    "Automobile",
+    "Aerospace",
+    "ECE",
+    "CSE",
+    "EEE",
+    "IT",
+    "AIML",
+    "AI & ML",
 ]
 
 COLLEGE_RE = re.compile(
@@ -449,7 +469,7 @@ def extract_links(text: str):
 
 
 def extract_location(header_lines):
-    # Pattern 1: "City, State"
+    # Pattern 1: "City, State" or "City, District, State"
     for line in header_lines:
         stripped = line.strip(" •·-–—|#*")
         if not stripped or len(stripped) > 60:
@@ -457,7 +477,7 @@ def extract_location(header_lines):
         if _is_contact_line(stripped):
             continue
         if re.fullmatch(
-            r"[A-Z][a-zA-Z]+(?:[\s\-][A-Z][a-zA-Z]+)*,\s*[A-Z][a-zA-Z]+(?:\s*[A-Z]{2})?",
+            r"[A-Z][a-zA-Z]+(?:[\s\-][A-Z][a-zA-Z]+)*(?:,\s*[A-Z][a-zA-Z]+(?:\s*[A-Z]{2})?)+",
             stripped,
         ):
             return stripped
@@ -655,13 +675,17 @@ def _extract_dated_entries(section_lines):
 def _extract_projects(section_text: str) -> list:
     entries = []
     current = None
+    lines = section_text.splitlines()
 
-    for line in section_text.splitlines():
+    for i, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
             continue
 
         is_bullet = bool(re.match(r"^\s*[•\-–—*]", stripped))
+        is_tech_line = stripped.lower().startswith(
+            ("technologies:", "tech stack:", "tools:")
+        )
 
         # Bullet with "Title — description" / "Title : description"
         m = None
@@ -669,20 +693,43 @@ def _extract_projects(section_text: str) -> list:
             body = re.sub(r"^\s*[•\-–—*]\s*", "", stripped)
             m = re.split(r"\s*(?:—|–|:|\|| - )\s*", body, maxsplit=1)
 
-        if m and m[0].strip() and len(m[0].strip()) <= 60:
+        # Also detect plain-line project titles: short line followed by a
+        # technologies line (or another title / end of section)
+        is_plain_title = False
+        if not is_bullet and not is_tech_line:
+            # Heuristic: reasonable title length, doesn't look like a section header
+            if 3 <= len(stripped) <= 80 and not re.match(
+                r"^(projects?|certifications?|achievements?|education|skills?|experience|internships?)\s*:?$",
+                stripped,
+                re.IGNORECASE,
+            ):
+                # Look ahead: if next non-empty line is a technologies line, this is likely a title
+                next_idx = i + 1
+                while next_idx < len(lines) and not lines[next_idx].strip():
+                    next_idx += 1
+                if next_idx < len(lines):
+                    next_line = lines[next_idx].strip()
+                    if next_line.lower().startswith(
+                        ("technologies:", "tech stack:", "tools:")
+                    ):
+                        is_plain_title = True
+
+        if (m and m[0].strip() and len(m[0].strip()) <= 60) or is_plain_title:
             if current is not None:
                 entries.append(current)
-            title = m[0].strip()
-            description = m[1].strip() if len(m) > 1 and m[1].strip() else None
+            if is_plain_title:
+                title = stripped
+                description = None
+            else:
+                title = m[0].strip()
+                description = m[1].strip() if len(m) > 1 and m[1].strip() else None
             current = {"title": title, "description": description, "body": [stripped]}
         else:
             if current is not None:
                 current["body"].append(stripped)
-                if current["description"] is None:
+                if current["description"] is None and not is_tech_line:
                     current["description"] = stripped
-            elif is_bullet and not stripped.lower().startswith(
-                ("technologies:", "tech stack:", "tools:")
-            ):
+            elif is_bullet and not is_tech_line:
                 # A bullet without a title marker - start an unnamed entry
                 current = {"title": None, "description": stripped, "body": [stripped]}
 

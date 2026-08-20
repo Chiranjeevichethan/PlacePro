@@ -1,0 +1,73 @@
+{
+  "model": "Logistic Regression Tuned",
+  "model_path": "models/placepro_phase15_best_model.pkl",
+  "features": [
+    "branch",
+    "college_tier",
+    "cgpa",
+    "backlogs",
+    "coding_skills",
+    "dsa_score",
+    "aptitude_score",
+    "communication_skills",
+    "ml_knowledge",
+    "system_design",
+    "internships",
+    "projects_count",
+    "certifications",
+    "hackathons",
+    "open_source_contributions",
+    "extracurriculars",
+    "overall_skill_score",
+    "academic_skill_index",
+    "experience_score",
+    "high_cgpa",
+    "has_internship",
+    "project_level",
+    "coding_experience_interaction",
+    "cgpa_projects_interaction",
+    "backlog_risk",
+    "strong_candidate_indicator"
+  ],
+  "feature_engineering": "create_features() from src/pipeline.py (Phase 7 rules, deterministic, leak-free)",
+  "preprocessing": "median impute -> StandardScaler (numeric); most-frequent impute -> OneHotEncoder (cat)",
+  "training_dataset": "data/placement_phase6.csv",
+  "rows": 100000,
+  "random_seed": 42,
+  "split": "80/20 stratified random_state=42",
+  "test_metrics": {
+    "Accuracy": 0.63185,
+    "Precision": 0.795556,
+    "Recall": 0.622271,
+    "F1": 0.698324,
+    "ROC-AUC": 0.685333,
+    "PR-AUC": 0.817389,
+    "Balanced Accuracy": 0.637464,
+    "Brier": 0.224126
+  },
+  "cv_metrics": {
+    "Accuracy": "0.6289 +/- 0.0041",
+    "ROC-AUC": "0.6858 +/- 0.0047",
+    "F1": "0.6961 +/- 0.0042"
+  },
+  "optimal_threshold_f1": {
+    "model": "Logistic Regression Tuned",
+    "threshold": 0.25,
+    "accuracy": 0.6962,
+    "precision": 0.6987,
+    "recall": 0.9781,
+    "f1": 0.8151,
+    "balanced_accuracy": 0.531
+  },
+  "calibration": {
+    "raw": 0.22412601842702826,
+    "sigmoid": 0.19610871512409417,
+    "isotonic": 0.19615212001833238
+  },
+  "train_test_gap": {
+    "accuracy": -0.0031,
+    "roc_auc": 0.001
+  },
+  "replaces_production_model": false,
+  "note": "Saved for evaluation. The production model (models/placepro_final_model.pkl) is NOT replaced - Phase 15 does not silently swap models. To serve this model explicitly: predict_placement(data, model_path='models/placepro_phase15_best_model.pkl')."
+}
