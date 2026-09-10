@@ -47,6 +47,10 @@ EDITABLE_SECTIONS = (
     "certifications",
     "achievements",
     "ml_inputs",
+    # Student-provided context that is NOT a model feature. Listed here so
+    # edits get provenance.user like any other student input; the ML
+    # feature mapping never reads it (see schemas_profile.AdditionalInfo).
+    "additional_info",
 )
 
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9\-_]+$")
@@ -206,6 +210,7 @@ def build_draft_from_resume(filename: str, content: bytes, content_type=None):
         "certifications": extracted.get("certifications") or [],
         "achievements": extracted.get("achievements") or {},
         "ml_inputs": {},
+        "additional_info": {},
         "provenance": {
             "resume": collect_nonempty_paths(extracted),
             "user": [],
@@ -380,6 +385,7 @@ def create_draft_with_analysis(filename: str, content: bytes, content_type=None)
         "certifications": extracted.get("certifications") or [],
         "achievements": extracted.get("achievements") or {},
         "ml_inputs": {},
+        "additional_info": {},
         "provenance": {
             "resume": collect_nonempty_paths(extracted),
             "user": [],

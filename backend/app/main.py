@@ -22,6 +22,7 @@ from .routes.readiness import router as readiness_router
 from .routes.eligibility import router as eligibility_router
 from .routes.recommendation import router as recommendation_router
 from .routes.assessment import router as assessment_router
+from .routes.performance import router as performance_router
 from src.pipeline import MODEL_VERSION
 
 app = FastAPI(
@@ -47,6 +48,7 @@ app.include_router(readiness_router)
 app.include_router(eligibility_router)
 app.include_router(recommendation_router)
 app.include_router(assessment_router)
+app.include_router(performance_router)
 
 
 @app.get("/health", tags=["health"])

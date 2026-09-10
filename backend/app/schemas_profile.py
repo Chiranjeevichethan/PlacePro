@@ -9,6 +9,10 @@
 #   C. ml_derived        -> provenance.ml     (RESERVED for Phase 11+
 #                                             model outputs; empty now)
 #
+# `additional_info` also carries provenance.user, but is explicitly NOT
+# a model feature: it is context the student supplies and is never sent
+# to the model (see AdditionalInfo).
+#
 # Rules:
 #   - Missing information stays null / [] - never invented.
 #   - `verified` is only True after the student explicitly confirms
@@ -70,6 +74,34 @@ class MlInputs(BaseModel):
     extracurriculars: Optional[int] = None
 
 
+class AdditionalInfo(BaseModel):
+    """Student-provided context that is NOT a model feature.
+
+    The Phase 8 model was trained on exactly 16 columns (see
+    src/pipeline.py RAW_FEATURE_COLUMNS). These fields are collected
+    because they are useful context for the student and for advisors,
+    but they are NEVER sent to the model and NEVER influence a
+    prediction, a readiness score or an eligibility decision.
+
+    Stored with provenance.user (the student typed them). Missing
+    values stay None - nothing is invented or defaulted.
+    """
+
+    age: Optional[int] = Field(default=None, ge=15, le=60)
+    gender: Optional[str] = None
+    attendance: Optional[float] = Field(
+        default=None, ge=0.0, le=100.0, description="Class attendance %"
+    )
+    logical_reasoning: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    mock_interview: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    leadership: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    github_repositories: Optional[int] = Field(default=None, ge=0)
+    linkedin_connections: Optional[int] = Field(default=None, ge=0)
+    volunteer_experience: Optional[str] = None
+    sleep_hours: Optional[float] = Field(default=None, ge=0.0, le=24.0)
+    study_hours: Optional[float] = Field(default=None, ge=0.0, le=24.0)
+
+
 class Provenance(BaseModel):
     """Where each non-empty profile value came from (dotted field paths)."""
 
@@ -100,6 +132,13 @@ class StudentProfile(BaseModel):
     certifications: List[CertificationEntry] = Field(default_factory=list)
     achievements: Achievements = Field(default_factory=Achievements)
     ml_inputs: MlInputs = Field(default_factory=MlInputs)
+    additional_info: AdditionalInfo = Field(
+        default_factory=AdditionalInfo,
+        description=(
+            "Student-provided context that is NOT a model feature and is "
+            "never sent to the model (see AdditionalInfo)."
+        ),
+    )
     provenance: Provenance = Field(default_factory=Provenance)
     original_resume_values: Dict[str, Optional[Union[float, int, str, List]]] = Field(
         default_factory=dict,
