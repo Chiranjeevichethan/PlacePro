@@ -54,7 +54,7 @@
 #
 # ============================================================
 
-from ..data.companies import get_active_companies
+from .company_store import get_active_companies  # Phase 28C store
 from .eligibility_service import evaluate_company_eligibility
 from .ml_feature_mapping import check_profile_completion
 from .prediction_service import predict as predict_with_model

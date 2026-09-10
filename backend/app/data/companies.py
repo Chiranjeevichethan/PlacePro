@@ -1,16 +1,21 @@
 # ============================================================
-# PLACEPRO - PHASE 13 - DEMO COMPANY DATASET
+# PLACEPRO - PHASE 28C - DEMO COMPANY SEED DATA
 # ============================================================
 #
 # IMPORTANT DISCLAIMER
 # --------------------
 # These are SAMPLE / DEMO company requirements used to exercise
-# the eligibility engine. They are NOT official hiring criteria
-# for any real company. Real companies' requirements must be
-# supplied by an authorized placement/admin user (future phase).
+# the eligibility and recommendation engines. They are NOT official
+# hiring criteria for any real company. Every requirement set built
+# from this file is stored with source_type "DEMO" and
+# verification_status "DEMO" so it can never be presented as real.
 #
-# This module is the SINGLE configured source of company data.
-# Routes never hard-code company logic - they read from here.
+# Real companies' requirements must be supplied by an authorized
+# placement/admin user with proper provenance (Phase 28D).
+#
+# This module is the SINGLE configured DEMO SEED source. Database
+# access lives in backend/app/services/company_store.py - this file
+# contains data only (no storage logic).
 #
 # Requirement fields (all optional; absent = not evaluated):
 #   min_cgpa                 minimum CGPA (e.g. 7.5)
@@ -30,11 +35,17 @@
 #
 # ============================================================
 
-# A company that is not "active" is excluded from the company list
-# and from all-company eligibility.
-ACTIVE_COMPANIES = []
+# Demo companies have no publicly documented locations in this
+# repository - the field is present in the schema but left empty
+# rather than invented.
+_DEMO_LOCATIONS = []
 
-_COMPANIES = [
+_DEMO_NOTES = (
+    "DEMO seed data - sample requirements for engine testing only. "
+    "NOT official hiring criteria for any real company."
+)
+
+_SEED_COMPANIES = [
     {
         "company_id": "company_001",
         "company_name": "DemoTech",
@@ -170,17 +181,36 @@ _COMPANIES = [
     },
 ]
 
-ACTIVE_COMPANIES = [c for c in _COMPANIES if c.get("active", True)]
 
+def seed_demo_companies() -> list:
+    """DEMO seed rows for the company store (Phase 28C).
 
-def get_company(company_id: str):
-    """Return a company dict by id (active or not), or None."""
-    for company in _COMPANIES:
-        if company["company_id"] == company_id:
-            return company
-    return None
+    Returns a list of enriched company dicts. Each carries:
+      - the original demo fields (company_id/company_name/industry/
+        roles/active/requirements)
+      - `locations`: [] (no location is invented for demo data)
+      - `notes`: explicit DEMO disclaimer
+      - `requirement_set`: provenance metadata stored alongside the
+        requirements, with source_type / verification_status "DEMO"
 
-
-def get_active_companies():
-    """Return all active companies (the ones students can be checked against)."""
-    return list(ACTIVE_COMPANIES)
+    The requirements dict uses the historical flat shape (present keys
+    only). The store converts it into per-field rows that preserve the
+    provided / not-provided distinction.
+    """
+    enriched = []
+    for company in _SEED_COMPANIES:
+        row = dict(company)
+        row["locations"] = list(_DEMO_LOCATIONS)
+        row["notes"] = _DEMO_NOTES
+        row["requirement_set"] = {
+            "requirement_set_id": f"{company['company_id']}_demo_v1",
+            "recruitment_cycle": None,
+            "source_type": "DEMO",
+            "source_url": None,
+            "verified_at": None,
+            "verified_by": None,
+            "verification_status": "DEMO",
+            "notes": _DEMO_NOTES,
+        }
+        enriched.append(row)
+    return enriched

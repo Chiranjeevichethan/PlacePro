@@ -35,7 +35,7 @@
 
 import re
 
-from ..data.companies import get_active_companies, get_company
+from .company_store import get_active_companies, get_company  # Phase 28C store
 from .ml_feature_mapping import map_profile_to_ml_features
 from .profile_service import ProfileNotFoundError, get_profile
 from .readiness_service import collect_verified_skills

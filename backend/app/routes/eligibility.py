@@ -12,8 +12,9 @@
 #   GET /api/profile/{profile_id}/eligibility
 #       -> eligibility against all active companies
 #
-# Company data comes ONLY from the configured server-side dataset
-# (backend/app/data/companies.py) - clients cannot modify
+# Company data comes ONLY from the configured server-side company
+# store (Phase 28C: SQLite via backend/app/services/company_store.py,
+# seeded from backend/app/data/companies.py) - clients cannot modify
 # requirements or supply company files.
 #
 # ============================================================
