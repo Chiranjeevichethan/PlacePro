@@ -15,6 +15,8 @@ const defaultProfile = {
   certifications: "4",
   githubRepositories: "5",
   linkedinConnections: "120",
+  skills: "Python, SQL, Excel, Power BI",
+  preferredRole: "Data Analyst",
 };
 
 function loadProfile() {
@@ -92,7 +94,17 @@ function StudentProfile({
       detail: "Professional network",
     },
     { label: "Volunteer Experience", value: "Yes", detail: "Volunteering activity" },
+    {
+      label: "Preferred Role",
+      value: profile.preferredRole || "Not set",
+      detail: "Target job role",
+    },
   ];
+
+  const skillsList = String(profile.skills || "")
+    .split(",")
+    .map((skill) => skill.trim())
+    .filter(Boolean);
 
   const skillData = [
     { label: "Coding Skill", value: 75 },
@@ -184,6 +196,16 @@ function StudentProfile({
           <IconMark name="skills" className="section-title-icon" />
           <span>Skills & Assessments</span>
         </h2>
+
+        {skillsList.length > 0 && (
+          <div className="profile-skills-row">
+            {skillsList.map((skill) => (
+              <span key={skill} className="skill-chip matched">
+                {skill}
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="profile-grid">
           {skillData.map((item) => (

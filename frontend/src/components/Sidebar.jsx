@@ -4,6 +4,10 @@ import Logo from "./Logo";
 const menuItems = [
   { page: "dashboard", label: "Dashboard", icon: "dashboard" },
   { page: "prediction", label: "Placement Prediction", icon: "prediction" },
+  { page: "salary", label: "Salary Prediction", icon: "salary" },
+  { page: "companies", label: "Company Recommendations", icon: "company" },
+  { page: "skillgap", label: "Skill Gap Analysis", icon: "skills" },
+  { page: "mocktests", label: "Mock Tests", icon: "mocktest" },
   { page: "profile", label: "Student Profile", icon: "profile" },
   { page: "performance", label: "Performance Analysis", icon: "performance" },
   { page: "about", label: "About", icon: "about" },

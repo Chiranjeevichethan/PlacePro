@@ -224,6 +224,44 @@ const icons = {
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </>
   ),
+  // briefcase with building / companies
+  company: (
+    <>
+      <path d="M3 21h18" />
+      <path d="M5 21V7l7-4 7 4v14" />
+      <path d="M9 21v-4h6v4" />
+      <path d="M9 11h.01" />
+      <path d="M15 11h.01" />
+      <path d="M9 15h.01" />
+      <path d="M15 15h.01" />
+    </>
+  ),
+  // graduation cap with arrow / learning
+  learning: (
+    <>
+      <path d="M22 10 12 5 2 10l10 5 10-5z" />
+      <path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5" />
+      <path d="M20 17v6" />
+      <path d="M17 20h6" />
+    </>
+  ),
+  // banknote / salary
+  salary: (
+    <>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <circle cx="12" cy="12" r="2.5" />
+      <path d="M6 12h.01" />
+      <path d="M18 12h.01" />
+    </>
+  ),
+  // clipboard with checkmark / mock test
+  mocktest: (
+    <>
+      <path d="M9 2h6a1 1 0 0 1 1 1v1H8V3a1 1 0 0 1 1-1z" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <path d="m9 13 2 2 4-4" />
+    </>
+  ),
 };
 
 const labels = {
@@ -255,6 +293,10 @@ const labels = {
   stack: "TS",
   future: "FS",
   team: "TM",
+  company: "CO",
+  learning: "LR",
+  salary: "SAL",
+  mocktest: "MT",
 };
 
 function IconMark({ name, className = "" }) {

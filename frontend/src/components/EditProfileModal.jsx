@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 
 const TIERS = ["Tier 1", "Tier 2", "Tier 3"];
 
+const ROLE_OPTIONS = [
+  "Data Analyst",
+  "Data Scientist",
+  "Software Developer",
+  "Full Stack Developer",
+  "ML Engineer",
+];
+
 const FIELDS = [
   { name: "name", label: "Name", type: "text", placeholder: "Full name" },
   {
@@ -39,6 +47,18 @@ const FIELDS = [
     type: "number",
     min: "0",
   },
+  {
+    name: "skills",
+    label: "Skills (comma separated)",
+    type: "text",
+    placeholder: "e.g. Python, SQL, Excel",
+  },
+  {
+    name: "preferredRole",
+    label: "Preferred Role",
+    type: "select",
+    options: ROLE_OPTIONS,
+  },
 ];
 
 const COUNT_FIELDS = [
@@ -50,7 +70,11 @@ const COUNT_FIELDS = [
 ];
 
 function EditProfileModal({ profile, onSave, onClose = () => {} }) {
-  const [form, setForm] = useState(() => ({ ...profile }));
+  const [form, setForm] = useState(() => ({
+    skills: "",
+    preferredRole: "",
+    ...profile,
+  }));
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -127,6 +151,8 @@ function EditProfileModal({ profile, onSave, onClose = () => {} }) {
       certifications: normalizeNumber(form.certifications),
       githubRepositories: normalizeNumber(form.githubRepositories),
       linkedinConnections: normalizeNumber(form.linkedinConnections),
+      skills: form.skills.trim(),
+      preferredRole: form.preferredRole,
     });
   };
 

@@ -5,6 +5,10 @@ import Sidebar from "./components/Sidebar";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Prediction from "./pages/Prediction";
+import SalaryPrediction from "./pages/SalaryPrediction";
+import CompanyRecommendations from "./pages/CompanyRecommendations";
+import SkillGapAnalysis from "./pages/SkillGapAnalysis";
+import MockTests from "./pages/MockTests";
 import StudentProfile from "./pages/StudentProfile";
 import PerformanceAnalysis from "./pages/PerformanceAnalysis";
 import About from "./pages/About";
@@ -63,6 +67,22 @@ function App() {
 
           {currentPage === "prediction" && (
             <Prediction />
+          )}
+
+          {currentPage === "salary" && (
+            <SalaryPrediction />
+          )}
+
+          {currentPage === "companies" && (
+            <CompanyRecommendations />
+          )}
+
+          {currentPage === "skillgap" && (
+            <SkillGapAnalysis />
+          )}
+
+          {currentPage === "mocktests" && (
+            <MockTests />
           )}
 
           {currentPage === "profile" && (

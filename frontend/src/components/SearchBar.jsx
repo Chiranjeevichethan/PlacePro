@@ -12,6 +12,26 @@ const SEARCH_PAGES = [
     keywords: "predict placement ai model form",
   },
   {
+    page: "salary",
+    label: "Salary Prediction",
+    keywords: "salary prediction estimate lpa pay package ctc",
+  },
+  {
+    page: "companies",
+    label: "Company Recommendations",
+    keywords: "company companies recommendations match jobs roles",
+  },
+  {
+    page: "skillgap",
+    label: "Skill Gap Analysis",
+    keywords: "skill gap analysis learning resources target role",
+  },
+  {
+    page: "mocktests",
+    label: "Mock Tests",
+    keywords: "mock test quiz practice questions python sql dbms networks operating systems aptitude",
+  },
+  {
     page: "profile",
     label: "Student Profile",
     keywords: "profile student edit details",
@@ -94,7 +114,9 @@ function SearchBar({ onNavigate }) {
       )
     : SEARCH_PAGES;
 
-  const showDropdown = open && trimmed.length > 0;
+  // Show the dropdown on focus even before typing, so all pages are
+  // discoverable (dropdown was previously query-only).
+  const showDropdown = open;
 
   const selectPage = (page) => {
     onNavigate(page);
