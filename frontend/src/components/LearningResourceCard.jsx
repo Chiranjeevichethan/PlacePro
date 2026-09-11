@@ -2,9 +2,28 @@
  * LearningResourceCard - learning resources for one missing skill.
  * Links use only well-known platforms and open in a new browser tab
  * (target="_blank" with rel="noopener noreferrer").
+ *
+ * Resources come from the FRONTEND catalog (src/data/recommendationData.js);
+ * the missing skill itself comes from the backend readiness response. When
+ * the catalog has no entry for a backend-reported missing skill, the card
+ * states that instead of hiding the skill.
  */
 function LearningResourceCard({ skill, resources = [] }) {
-  if (!resources.length) return null;
+  if (!resources.length) {
+    return (
+      <div className="resource-card">
+        <div className="resource-card-header">
+          <h3>
+            Missing skill: <strong>{skill}</strong>
+          </h3>
+          <span className="resource-count">0 resources</span>
+        </div>
+        <p className="skills-empty">
+          No learning resources available for this skill yet.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="resource-card">

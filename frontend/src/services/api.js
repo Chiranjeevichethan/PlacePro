@@ -133,6 +133,71 @@ export async function updateStudentProfile(profileId, payload) {
   return data;
 }
 
+/**
+ * Fetch the placement readiness + skill-gap analysis from the backend.
+ *
+ * GET /api/profile/{id}/readiness -> ReadinessResponse:
+ *   {
+ *     profile_id,
+ *     readiness_score,          // integer 0-100 (rule-based, NOT the ML probability)
+ *     readiness_level,          // e.g. "Placement Ready"
+ *     readiness_breakdown,      // documented 0-100 score components
+ *     strengths: [{ skill, category?, evidence? }],
+ *     skill_gaps: [{ skill, category, priority, reason }],
+ *     improvement_plan: [{ priority, skill, reason, action }],
+ *     profile_completeness: { percentage, missing_fields }
+ *   }
+ *
+ * The backend is authoritative: nothing here is computed or substituted.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchStudentReadiness(profileId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/readiness`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the readiness service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Student readiness data was not found.");
+    }
+
+    throw new Error("Unable to load readiness data. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to load readiness data. Please try again.");
+  }
+
+  /* Malformed 200: validate the required top-level structure instead of
+     substituting zeros or inventing values. */
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !Number.isFinite(Number(data.readiness_score)) ||
+    typeof data.readiness_level !== "string" ||
+    !data.readiness_breakdown ||
+    typeof data.readiness_breakdown !== "object"
+  ) {
+    throw new Error(
+      "The readiness service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
 /** Readable labels for backend validation fields (HTTP 422 messages). */
 const FIELD_LABELS = {
   branch: "Branch",
