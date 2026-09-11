@@ -10,14 +10,16 @@ function Prediction() {
 
   const handlePrediction = async (formData) => {
     setError(null);
+    setPrediction(null);
     setIsPredicting(true);
 
     try {
       const result = await predictPlacement(formData);
       setPrediction(result);
-    } catch {
+    } catch (err) {
       setError(
-        "Something went wrong while generating the prediction. Please try again."
+        err?.message ??
+          "Something went wrong while generating the prediction. Please try again."
       );
     } finally {
       setIsPredicting(false);
@@ -36,15 +38,6 @@ function Prediction() {
           Enter the student's information to predict their placement
           probability.
         </p>
-      </div>
-
-      {/* =========================================
-          DEMO MODE NOTICE
-          ========================================= */}
-      <div className="demo-banner">
-        <strong>Demo mode:</strong> Predictions are currently generated
-        locally for demonstration purposes. They will be replaced by the real
-        ML model when the backend API is integrated.
       </div>
 
       {/* =========================================
@@ -126,6 +119,17 @@ function Prediction() {
                 </div>
               </div>
 
+              {/* CONFIDENCE */}
+              <div className="prediction-probability">
+                <div className="prediction-percentage">
+                  {prediction.confidence}%
+                </div>
+
+                <div className="prediction-probability-label">
+                  Confidence
+                </div>
+              </div>
+
               {/* CONFIDENCE BAR */}
               <div className="confidence-track">
                 <div
@@ -135,19 +139,17 @@ function Prediction() {
                       : "confidence-risk"
                   }`}
                   style={{
-                    width: `${prediction.probability}%`,
+                    width: `${prediction.confidence}%`,
                   }}
                 ></div>
               </div>
 
               {/* MODEL INFORMATION */}
-              <p className="prediction-model-note">
-                Model: <strong>PlacePro ML Model</strong>
-
-                <span className="prediction-demo-tag">
-                  Demo
-                </span>
-              </p>
+              {prediction.modelVersion && (
+                <p className="prediction-model-note">
+                  Model: <strong>{prediction.modelVersion}</strong>
+                </p>
+              )}
 
               {/* EXISTING RISK RECOMMENDATIONS */}
               {prediction.probability < 50 && (
@@ -157,17 +159,11 @@ function Prediction() {
                   <ul>
                     <li>Improve coding skills</li>
                     <li>Complete more internships</li>
-                    <li>Improve mock interview score</li>
+                    <li>Practice DSA and system design</li>
                     <li>Reduce backlogs</li>
                   </ul>
                 </div>
               )}
-
-              {/* DEMO DISCLAIMER */}
-              <p className="prediction-data-note">
-                This is a temporary demo result and is not produced by
-                the ML model.
-              </p>
             </div>
           </div>
 

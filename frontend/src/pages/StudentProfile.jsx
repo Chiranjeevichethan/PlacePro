@@ -1,119 +1,86 @@
-import { useState } from "react";
 import IconMark from "../components/IconMark";
 import EditProfileModal from "../components/EditProfileModal";
-
-const PROFILE_KEY = "placepro_profile";
-
-const defaultProfile = {
-  name: "Bhargav",
-  branch: "Information Science and Engineering",
-  collegeTier: "Tier 2",
-  cgpa: "8.2",
-  attendance: "88",
-  internships: "2",
-  projects: "3",
-  certifications: "4",
-  githubRepositories: "5",
-  linkedinConnections: "120",
-  skills: "Python, SQL, Excel, Power BI",
-  preferredRole: "Data Analyst",
-};
-
-function loadProfile() {
-  try {
-    const raw = localStorage.getItem(PROFILE_KEY);
-    if (raw) {
-      return { ...defaultProfile, ...JSON.parse(raw) };
-    }
-  } catch {
-    // Ignore malformed storage and fall back to defaults.
-  }
-  return defaultProfile;
-}
+import { useStudentProfile } from "../hooks/useProfile";
 
 function StudentProfile({
   editOpen = false,
   onRequestEdit,
   onCloseEdit,
 }) {
-  const [profile, setProfile] = useState(loadProfile);
+  const {
+    profile,
+    rawProfile,
+    loading,
+    error,
+    refetch,
+    applyUpdatedProfile,
+  } = useStudentProfile();
 
-  const handleSave = (data) => {
-    setProfile(data);
-    try {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
-      window.dispatchEvent(new Event("placepro-profile-updated"));
-    } catch {
-      // Storage may be unavailable; profile still updates in memory.
-    }
-    if (onCloseEdit) {
-      onCloseEdit();
-    }
-  };
+  const academicData = profile
+    ? [
+        { label: "CGPA", value: profile.cgpa || "Not set", detail: "out of 10" },
+        {
+          label: "College Tier",
+          value: profile.collegeTierDisplay,
+          detail: "Institution category",
+        },
+        {
+          label: "Attendance",
+          value: profile.attendance ? `${profile.attendance}%` : "Not set",
+          detail: "Overall attendance",
+        },
+        {
+          label: "Backlogs",
+          value: profile.backlogs,
+          detail: "Active backlogs",
+        },
+      ]
+    : [];
 
-  const academicData = [
-    { label: "CGPA", value: profile.cgpa, detail: "out of 10" },
-    {
-      label: "College Tier",
-      value: profile.collegeTier,
-      detail: "Institution category",
-    },
-    {
-      label: "Attendance",
-      value: `${profile.attendance}%`,
-      detail: "Overall attendance",
-    },
-    { label: "Backlogs", value: "0", detail: "Active backlogs" },
-  ];
-
-  const experienceData = [
-    {
-      label: "Internships",
-      value: profile.internships,
-      detail: "Completed internships",
-    },
-    {
-      label: "Projects",
-      value: profile.projects,
-      detail: "Academic & personal projects",
-    },
-    {
-      label: "Certifications",
-      value: profile.certifications,
-      detail: "Earned certifications",
-    },
-    { label: "Hackathons", value: "2", detail: "Hackathons participated" },
-    {
-      label: "GitHub Repositories",
-      value: profile.githubRepositories,
-      detail: "Public repositories",
-    },
-    {
-      label: "LinkedIn Connections",
-      value: profile.linkedinConnections,
-      detail: "Professional network",
-    },
-    { label: "Volunteer Experience", value: "Yes", detail: "Volunteering activity" },
-    {
-      label: "Preferred Role",
-      value: profile.preferredRole || "Not set",
-      detail: "Target job role",
-    },
-  ];
-
-  const skillsList = String(profile.skills || "")
-    .split(",")
-    .map((skill) => skill.trim())
-    .filter(Boolean);
-
-  const skillData = [
-    { label: "Coding Skill", value: 75 },
-    { label: "Aptitude Score", value: 80 },
-    { label: "Communication", value: 75 },
-    { label: "Logical Reasoning", value: 78 },
-    { label: "Mock Interview", value: 70 },
-    { label: "Leadership", value: 75 },
-  ];
+  const experienceData = profile
+    ? [
+        {
+          label: "Internships",
+          value: profile.internshipsCount,
+          detail: "Completed internships",
+        },
+        {
+          label: "Projects",
+          value: profile.projectsCount,
+          detail: "Academic & personal projects",
+        },
+        {
+          label: "Certifications",
+          value: profile.certificationsCount,
+          detail: "Earned certifications",
+        },
+        {
+          label: "Hackathons",
+          value: profile.hackathonsCount,
+          detail: "Hackathons participated",
+        },
+        {
+          label: "GitHub Repositories",
+          value: profile.githubRepositories || "Not set",
+          detail: "Public repositories",
+        },
+        {
+          label: "LinkedIn Connections",
+          value: profile.linkedinConnections || "Not set",
+          detail: "Professional network",
+        },
+        {
+          label: "Volunteer Experience",
+          value: profile.volunteerExperience || "Not set",
+          detail: "Volunteering activity",
+        },
+        {
+          label: "Open Source Contributions",
+          value: profile.openSourceContributions || "Not set",
+          detail: "Community contributions",
+        },
+      ]
+    : [];
 
   return (
     <div className="profile-page">
@@ -122,114 +89,179 @@ function StudentProfile({
         <p>View student academic and professional information.</p>
       </div>
 
-      <div className="profile-card">
-        <div className="profile-card-top">
-          <div className="profile-intro">
-            <div className="profile-avatar gradient">
-              {profile.name ? profile.name.charAt(0).toUpperCase() : "?"}
-            </div>
+      {/* =========================================
+          LOADING STATE
+          ========================================= */}
+      {loading && (
+        <div className="profile-section profile-loading">
+          <div className="spinner" aria-hidden="true"></div>
+          <p>Loading student profile...</p>
+        </div>
+      )}
 
-            <div className="profile-identity">
-              <h2>{profile.name}</h2>
-              <p>{profile.branch}</p>
-              <div className="profile-badges">
-                <span className="profile-badge">Student</span>
-                <span className="profile-badge">
-                  {profile.collegeTier} College
-                </span>
-              </div>
-            </div>
+      {/* =========================================
+          ERROR STATE
+          ========================================= */}
+      {!loading && error && (
+        <div className="profile-section profile-error-state">
+          <div className="error-banner" role="alert">
+            {error}
           </div>
-
           <button
             type="button"
-            className="dash-btn secondary profile-edit-btn"
-            onClick={onRequestEdit}
+            className="dash-btn primary"
+            onClick={refetch}
           >
-            Edit Profile
+            Retry
           </button>
         </div>
+      )}
 
-        <p className="profile-data-note">
-          <strong>Sample data notice:</strong> The information on this page is
-          sample/demo data for illustration. It is not generated by the ML model
-          and will be replaced once the backend API is integrated.
-        </p>
-      </div>
+      {/* =========================================
+          PROFILE (backend data only — no demo fallback)
+          ========================================= */}
+      {!loading && !error && profile && (
+        <>
+          <div className="profile-card">
+            <div className="profile-card-top">
+              <div className="profile-intro">
+                <div className="profile-avatar gradient">
+                  {profile.name ? profile.name.charAt(0).toUpperCase() : "?"}
+                </div>
 
-      <div className="profile-section">
-        <h2>
-          <IconMark name="academic" className="section-title-icon" />
-          <span>Academic Information</span>
-        </h2>
+                <div className="profile-identity">
+                  <h2>{profile.name || "Unnamed Student"}</h2>
+                  <p>{profile.branchDisplay}</p>
+                  <div className="profile-badges">
+                    <span className="profile-badge">Student</span>
+                    <span className="profile-badge">
+                      {profile.collegeTierDisplay} College
+                    </span>
+                    {profile.verified && (
+                      <span className="profile-badge">Verified</span>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-        <div className="profile-grid">
-          {academicData.map((item) => (
-            <div key={item.label} className="profile-item">
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.detail}</small>
+              <button
+                type="button"
+                className="dash-btn secondary profile-edit-btn"
+                onClick={onRequestEdit}
+              >
+                Edit Profile
+              </button>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="profile-section">
-        <h2>
-          <IconMark name="experience" className="section-title-icon" />
-          <span>Experience & Activities</span>
-        </h2>
-
-        <div className="profile-grid">
-          {experienceData.map((item) => (
-            <div key={item.label} className="profile-item">
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-              <small>{item.detail}</small>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="profile-section">
-        <h2>
-          <IconMark name="skills" className="section-title-icon" />
-          <span>Skills & Assessments</span>
-        </h2>
-
-        {skillsList.length > 0 && (
-          <div className="profile-skills-row">
-            {skillsList.map((skill) => (
-              <span key={skill} className="skill-chip matched">
-                {skill}
-              </span>
-            ))}
           </div>
-        )}
 
-        <div className="profile-grid">
-          {skillData.map((item) => (
-            <div key={item.label} className="profile-item">
-              <span>{item.label}</span>
-              <strong>
-                {item.value}
-                <small> / 100</small>
-              </strong>
-              <div className="profile-bar">
-                <div
-                  className="profile-bar-fill"
-                  style={{ width: `${item.value}%` }}
-                ></div>
+          <div className="profile-section">
+            <h2>
+              <IconMark name="academic" className="section-title-icon" />
+              <span>Academic Information</span>
+            </h2>
+
+            <div className="profile-grid">
+              {academicData.map((item) => (
+                <div key={item.label} className="profile-item">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <h2>
+              <IconMark name="experience" className="section-title-icon" />
+              <span>Experience & Activities</span>
+            </h2>
+
+            <div className="profile-grid">
+              {experienceData.map((item) => (
+                <div key={item.label} className="profile-item">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <h2>
+              <IconMark name="skills" className="section-title-icon" />
+              <span>Skills & Assessments</span>
+            </h2>
+
+            {profile.skills.length > 0 && (
+              <div className="profile-skills-row">
+                {profile.skills.map((skill) => (
+                  <span key={skill} className="skill-chip matched">
+                    {skill}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="profile-grid">
+              <div className="profile-item">
+                <span>Coding Skill</span>
+                <strong>
+                  {profile.codingSkills || "Not set"}
+                  {profile.codingSkills && <small> / 10</small>}
+                </strong>
+              </div>
+
+              <div className="profile-item">
+                <span>DSA Score</span>
+                <strong>
+                  {profile.dsaScore || "Not set"}
+                  {profile.dsaScore && <small> / 10</small>}
+                </strong>
+              </div>
+
+              <div className="profile-item">
+                <span>Aptitude Score</span>
+                <strong>
+                  {profile.aptitudeScore || "Not set"}
+                  {profile.aptitudeScore && <small> / 100</small>}
+                </strong>
+              </div>
+
+              <div className="profile-item">
+                <span>Communication</span>
+                <strong>
+                  {profile.communicationSkills || "Not set"}
+                  {profile.communicationSkills && <small> / 10</small>}
+                </strong>
+              </div>
+
+              <div className="profile-item">
+                <span>ML Knowledge</span>
+                <strong>
+                  {profile.mlKnowledge || "Not set"}
+                  {profile.mlKnowledge && <small> / 10</small>}
+                </strong>
+              </div>
+
+              <div className="profile-item">
+                <span>System Design</span>
+                <strong>
+                  {profile.systemDesign || "Not set"}
+                  {profile.systemDesign && <small> / 10</small>}
+                </strong>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
 
-      {editOpen && (
+      {editOpen && profile && rawProfile && (
         <EditProfileModal
           profile={profile}
-          onSave={handleSave}
+          backendProfile={rawProfile}
+          onSaved={applyUpdatedProfile}
           onClose={onCloseEdit}
         />
       )}

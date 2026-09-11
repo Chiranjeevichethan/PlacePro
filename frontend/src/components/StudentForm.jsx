@@ -1,54 +1,65 @@
 import { useState } from "react";
 import IconMark from "./IconMark";
 
+/**
+ * Prediction form: collects EXACTLY the 16 inputs of the production
+ * placement model (placepro-final-v1). Field values are constrained to
+ * the training-distribution ranges below.
+ *
+ * codingSkill / communicationSkill keep the existing 0–100 UI scale;
+ * the API service converts them to the model's 0–10 scale.
+ */
 const RANGES = {
-  age: { min: 15, max: 60, label: "Age" },
-  cgpa: { min: 0, max: 10, label: "CGPA" },
-  internships: { min: 0, max: null, label: "Internships" },
-  projects: { min: 0, max: null, label: "Projects" },
-  certifications: { min: 0, max: null, label: "Certifications" },
-  codingSkill: { min: 0, max: 100, label: "Coding Skill" },
-  aptitudeScore: { min: 0, max: 100, label: "Aptitude Score" },
-  communicationSkill: { min: 0, max: 100, label: "Communication Skill" },
-  logicalReasoning: { min: 0, max: 100, label: "Logical Reasoning" },
-  hackathons: { min: 0, max: null, label: "Hackathons" },
-  githubRepositories: { min: 0, max: null, label: "GitHub Repositories" },
-  linkedinConnections: { min: 0, max: null, label: "LinkedIn Connections" },
-  mockInterview: { min: 0, max: 100, label: "Mock Interview Score" },
-  attendance: { min: 0, max: 100, label: "Attendance" },
-  backlogs: { min: 0, max: null, label: "Backlogs" },
-  extracurricular: { min: 0, max: null, label: "Extracurricular Activities" },
-  leadership: { min: 0, max: 100, label: "Leadership Score" },
-  sleepHours: { min: 0, max: 24, label: "Sleep Hours" },
-  studyHours: { min: 0, max: 24, label: "Study Hours" },
+  cgpa: { min: 4, max: 10, step: 0.01, label: "CGPA" },
+  backlogs: { min: 0, max: 3, step: 1, label: "Backlogs" },
+  codingSkill: { min: 0, max: 100, step: 1, label: "Coding Skill" },
+  dsaScore: { min: 1, max: 10, step: 0.1, label: "DSA Score" },
+  aptitudeScore: { min: 20, max: 100, step: 1, label: "Aptitude Score" },
+  communicationSkill: {
+    min: 0,
+    max: 100,
+    step: 1,
+    label: "Communication Skill",
+  },
+  mlKnowledge: { min: 0, max: 10, step: 0.1, label: "ML Knowledge" },
+  systemDesign: { min: 0, max: 10, step: 0.1, label: "System Design" },
+  internships: { min: 0, max: 3, step: 1, label: "Internships" },
+  projects: { min: 0, max: 5, step: 1, label: "Projects" },
+  certifications: { min: 0, max: 4, step: 1, label: "Certifications" },
+  hackathons: { min: 0, max: 3, step: 1, label: "Hackathons" },
+  openSourceContributions: {
+    min: 0,
+    max: 2,
+    step: 1,
+    label: "Open Source Contributions",
+  },
+  extracurricular: {
+    min: 0,
+    max: 3,
+    step: 1,
+    label: "Extracurricular Activities",
+  },
 };
 
-const REQUIRED_SELECTS = ["gender", "branch", "collegeTier", "volunteerExperience"];
+const REQUIRED_SELECTS = ["branch", "collegeTier"];
 
 const initialFormData = {
-  age: "",
-  gender: "",
   branch: "",
   collegeTier: "",
   cgpa: "",
+  backlogs: "",
+  codingSkill: "",
+  dsaScore: "",
+  aptitudeScore: "",
+  communicationSkill: "",
+  mlKnowledge: "",
+  systemDesign: "",
   internships: "",
   projects: "",
   certifications: "",
-  codingSkill: "",
-  aptitudeScore: "",
-  communicationSkill: "",
-  logicalReasoning: "",
   hackathons: "",
-  githubRepositories: "",
-  linkedinConnections: "",
-  mockInterview: "",
-  attendance: "",
-  backlogs: "",
+  openSourceContributions: "",
   extracurricular: "",
-  leadership: "",
-  volunteerExperience: "",
-  sleepHours: "",
-  studyHours: "",
 };
 
 const formSections = [
@@ -57,14 +68,6 @@ const formSections = [
     icon: "academic",
     kicker: "Core student and academic details",
     fields: [
-      { name: "age", label: "Age", type: "number", placeholder: "15 - 60" },
-      {
-        name: "gender",
-        label: "Gender",
-        type: "select",
-        options: ["Male", "Female", "Other"],
-        placeholder: "Select Gender",
-      },
       {
         name: "branch",
         label: "Branch",
@@ -91,20 +94,55 @@ const formSections = [
         ],
         placeholder: "Select Tier",
       },
-      { name: "cgpa", label: "CGPA", type: "number", placeholder: "0 - 10", step: "0.01" },
-      { name: "attendance", label: "Attendance (%)", type: "number", placeholder: "0 - 100" },
-      { name: "backlogs", label: "Backlogs", type: "number", min: "0" },
+      {
+        name: "cgpa",
+        label: "CGPA",
+        type: "number",
+        placeholder: "4 - 10",
+        step: "0.01",
+      },
+      { name: "backlogs", label: "Backlogs", type: "number", placeholder: "0 - 3" },
     ],
   },
   {
     title: "Technical Skills",
     icon: "technical",
-    kicker: "Portfolio, coding and build experience",
+    kicker: "Coding, DSA and build experience",
     fields: [
-      { name: "codingSkill", label: "Coding Skill", type: "number", placeholder: "0 - 100" },
-      { name: "projects", label: "Projects", type: "number", min: "0" },
-      { name: "certifications", label: "Certifications", type: "number", min: "0" },
-      { name: "githubRepositories", label: "GitHub Repositories", type: "number", min: "0" },
+      {
+        name: "codingSkill",
+        label: "Coding Skill (0 - 100)",
+        type: "number",
+        placeholder: "0 - 100",
+      },
+      {
+        name: "dsaScore",
+        label: "DSA Score (1 - 10)",
+        type: "number",
+        placeholder: "1 - 10",
+        step: "0.1",
+      },
+      {
+        name: "mlKnowledge",
+        label: "ML Knowledge (0 - 10)",
+        type: "number",
+        placeholder: "0 - 10",
+        step: "0.1",
+      },
+      {
+        name: "systemDesign",
+        label: "System Design (0 - 10)",
+        type: "number",
+        placeholder: "0 - 10",
+        step: "0.1",
+      },
+      { name: "projects", label: "Projects", type: "number", placeholder: "0 - 5" },
+      {
+        name: "certifications",
+        label: "Certifications",
+        type: "number",
+        placeholder: "0 - 4",
+      },
     ],
   },
   {
@@ -112,43 +150,44 @@ const formSections = [
     icon: "aptitude",
     kicker: "Assessment scores used in readiness analysis",
     fields: [
-      { name: "aptitudeScore", label: "Aptitude Score", type: "number", placeholder: "0 - 100" },
+      {
+        name: "aptitudeScore",
+        label: "Aptitude Score (20 - 100)",
+        type: "number",
+        placeholder: "20 - 100",
+      },
       {
         name: "communicationSkill",
-        label: "Communication Skill",
+        label: "Communication Skill (0 - 100)",
         type: "number",
         placeholder: "0 - 100",
       },
-      { name: "logicalReasoning", label: "Logical Reasoning", type: "number", placeholder: "0 - 100" },
-      { name: "mockInterview", label: "Mock Interview Score", type: "number", placeholder: "0 - 100" },
-      { name: "leadership", label: "Leadership Score", type: "number", placeholder: "0 - 100" },
     ],
   },
   {
     title: "Professional & Activities",
     icon: "professional",
-    kicker: "Experience, networking and campus participation",
+    kicker: "Experience, competitions and campus participation",
     fields: [
-      { name: "internships", label: "Internships", type: "number", min: "0" },
-      { name: "hackathons", label: "Hackathons", type: "number", min: "0" },
-      { name: "linkedinConnections", label: "LinkedIn Connections", type: "number", min: "0" },
-      { name: "extracurricular", label: "Extracurricular Activities", type: "number", min: "0" },
       {
-        name: "volunteerExperience",
-        label: "Volunteer Experience",
-        type: "select",
-        options: ["Yes", "No"],
-        placeholder: "Select",
+        name: "internships",
+        label: "Internships",
+        type: "number",
+        placeholder: "0 - 3",
       },
-    ],
-  },
-  {
-    title: "Study Habits",
-    icon: "habits",
-    kicker: "Daily rhythm and preparation consistency",
-    fields: [
-      { name: "sleepHours", label: "Sleep Hours", type: "number", placeholder: "0 - 24", step: "0.5" },
-      { name: "studyHours", label: "Study Hours / Day", type: "number", placeholder: "0 - 24", step: "0.5" },
+      { name: "hackathons", label: "Hackathons", type: "number", placeholder: "0 - 3" },
+      {
+        name: "openSourceContributions",
+        label: "Open Source Contributions",
+        type: "number",
+        placeholder: "0 - 2",
+      },
+      {
+        name: "extracurricular",
+        label: "Extracurricular Activities",
+        type: "number",
+        placeholder: "0 - 3",
+      },
     ],
   },
 ];
@@ -166,11 +205,8 @@ function StudentForm({ onPredict, isSubmitting = false }) {
 
       if (raw === "" || !Number.isFinite(value)) {
         nextErrors[field] = `${label} is required.`;
-      } else if (value < min || (max !== null && value > max)) {
-        nextErrors[field] =
-          max !== null
-            ? `${label} must be between ${min} and ${max}.`
-            : `${label} must be at least ${min}.`;
+      } else if (value < min || value > max) {
+        nextErrors[field] = `${label} must be between ${min} and ${max}.`;
       }
     });
 
@@ -240,12 +276,13 @@ function StudentForm({ onPredict, isSubmitting = false }) {
         ) : (
           <input
             id={field.name}
-            type={field.type}
+            type="number"
             name={field.name}
             value={formData[field.name]}
             onChange={handleChange}
             placeholder={field.placeholder}
             min={field.min}
+            max={field.max}
             step={field.step}
             className={hasError ? "invalid" : ""}
           />

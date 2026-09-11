@@ -1,11 +1,23 @@
 /**
- * useProfile - shared hook that reads the EXISTING PlacePro profile data
- * (localStorage key "placepro_profile") and live-updates when the profile is
- * edited. Deliberately does NOT create a second profile system: it reuses the
- * same storage key and "placepro-profile-updated" event already used by
- * StudentProfile.jsx and ProfileDropdown.jsx.
+ * Profile hooks (Phase 4B).
+ *
+ * The BACKEND (GET /api/profile/{id}) is the source of truth for profile
+ * data. There is exactly one profile source and one mirror:
+ *
+ *  - useStudentProfile(): loads the real backend profile for the Student
+ *    Profile page. On success it mirrors the flattened profile to
+ *    localStorage ("placepro_profile") and dispatches the existing
+ *    "placepro-profile-updated" event. Returns { profile, loading, error,
+ *    refetch } — `profile` is null while loading/failed (never fake data).
+ *
+ *  - useProfile(): existing hook used by demo pages (Salary Prediction,
+ *    Skill Gap, Company Recommendations — later phases). Unchanged return
+ *    contract: the flat profile object, now fed by the backend mirror
+ *    instead of stale edit-session values.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { fetchStudentProfile } from "../services/api";
+import { DEMO_PROFILE_ID, flattenBackendProfile } from "../services/profileConfig";
 
 const PROFILE_KEY = "placepro_profile";
 
@@ -24,7 +36,7 @@ const DEFAULT_PROFILE = {
   preferredRole: "",
 };
 
-function loadProfile() {
+function loadMirror() {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
     if (raw) {
@@ -36,11 +48,99 @@ function loadProfile() {
   return DEFAULT_PROFILE;
 }
 
-export default function useProfile() {
-  const [profile, setProfile] = useState(loadProfile);
+/**
+ * Loads the student profile from the real backend.
+ * The backend is authoritative: no demo values are ever substituted here.
+ */
+export function useStudentProfile() {
+  const [status, setStatus] = useState("loading");
+  const [profile, setProfile] = useState(null);
+  const [rawProfile, setRawProfile] = useState(null);
+  const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    const sync = () => setProfile(loadProfile());
+    let active = true;
+
+    fetchStudentProfile(DEMO_PROFILE_ID)
+      .then((data) => {
+        if (!active) return;
+
+        const display = flattenBackendProfile(data.profile);
+        setProfile(display);
+        setRawProfile(data.profile);
+        setStatus("success");
+
+        // Mirror for useProfile() consumers (demo pages) and the navbar.
+        try {
+          localStorage.setItem(PROFILE_KEY, JSON.stringify(display));
+          window.dispatchEvent(new Event("placepro-profile-updated"));
+        } catch {
+          // Storage may be unavailable; the page still shows backend data.
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+
+        setProfile(null);
+        setRawProfile(null);
+        setStatus("error");
+        setError(
+          err?.message ??
+            "Unable to load student profile. Please try again."
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  const refetch = useCallback(() => {
+    // Event-handler state updates (not effect-body): restart the load.
+    setAttempt((n) => n + 1);
+    setStatus("loading");
+    setError(null);
+  }, []);
+
+  /**
+   * Applies a successful PUT response (the updated backend profile) without
+   * a refetch: { profile, completion, message } -> { profile: {...} }.
+   */
+  const applyUpdatedProfile = useCallback((data) => {
+    if (!data?.profile) return;
+
+    const display = flattenBackendProfile(data.profile);
+    setProfile(display);
+    setRawProfile(data.profile);
+
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(display));
+      window.dispatchEvent(new Event("placepro-profile-updated"));
+    } catch {
+      // Storage may be unavailable; the page still shows backend data.
+    }
+  }, []);
+
+  return {
+    profile,
+    rawProfile,
+    loading: status === "loading",
+    error,
+    refetch,
+    applyUpdatedProfile,
+  };
+}
+
+/**
+ * Legacy/demo hook (unchanged contract): reads the profile mirror that
+ * useStudentProfile() keeps in sync with the backend.
+ */
+export default function useProfile() {
+  const [profile, setProfile] = useState(loadMirror);
+
+  useEffect(() => {
+    const sync = () => setProfile(loadMirror());
     window.addEventListener("storage", sync);
     window.addEventListener("placepro-profile-updated", sync);
     return () => {

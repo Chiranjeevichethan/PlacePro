@@ -1308,6 +1308,30 @@
   font-size: 13px;
 }
 
+/* Phase 4B: profile page loading / error states */
+.profile-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.profile-error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+}
+
+.profile-error-state .error-banner {
+  width: 100%;
+  max-width: 560px;
+  text-align: center;
+}
+
 .profile-section {
   margin-bottom: 25px;
 }
