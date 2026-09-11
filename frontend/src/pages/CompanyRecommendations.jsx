@@ -1,33 +1,103 @@
 /**
- * Company Recommendations page (Phase 1A).
+ * Company Recommendations page (Phase 4D).
  *
- * Shows a demo student profile summary and demo company recommendations with
- * a transparent skill match (matched skills / required skills x 100).
- * All data is DEMO data until a real recommendation backend exists.
+ * Ranked company recommendations from the REAL FastAPI endpoint
+ * (GET /api/profile/{id}/recommendations). The backend is the source of
+ * truth: companies, group membership, ordering, and every score come from
+ * the response. No demo companies, no frontend match/score computation.
+ *
+ * The student profile summary uses the already-integrated profile API
+ * (GET /api/profile/{id}, Phase 4B) — the recommendations endpoint does not
+ * provide profile data, and no demo profile values are shown.
  */
+import { useCallback, useEffect, useState } from "react";
 import IconMark from "../components/IconMark";
 import CompanyCard from "../components/CompanyCard";
-import { getCompanyRecommendations } from "../services/recommendation";
-import useProfile from "../hooks/useProfile";
+import { fetchCompanyRecommendations, fetchStudentProfile } from "../services/api";
+import { DEMO_PROFILE_ID, flattenBackendProfile } from "../services/profileConfig";
+
+/** Group render order (backend ranking inside each group is kept as-is). */
+const RECOMMENDATION_GROUPS = [
+  { key: "recommended", title: "Recommended Companies", icon: "placement" },
+  { key: "eligible", title: "Eligible Companies", icon: "objective" },
+  { key: "incomplete", title: "Incomplete Information", icon: "academic" },
+  { key: "not_recommended", title: "Not Recommended", icon: "skills" },
+];
 
 function CompanyRecommendations() {
-  const profile = useProfile();
-  const recommendations = getCompanyRecommendations(profile);
+  /* Recommendations: loading / success / error, SkillGapAnalysis pattern. */
+  const [status, setStatus] = useState("loading");
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
 
-  const summaryItems = [
-    { label: "CGPA", value: profile.cgpa || "—" },
-    {
-      label: "Skills",
-      value: profile.skills ? `${profile.skills.split(",").length} listed` : "Demo set",
-    },
-    { label: "Projects", value: profile.projects || "—" },
-    { label: "Internships", value: profile.internships || "—" },
-    { label: "Certifications", value: profile.certifications || "—" },
-    {
-      label: "Preferred Role",
-      value: profile.preferredRole || "Not set",
-    },
-  ];
+  /* Profile summary from the existing (Phase 4B) profile API. Optional:
+     if it fails, the summary section is hidden and recommendations still
+     render — no demo profile values are ever substituted. */
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    fetchCompanyRecommendations(DEMO_PROFILE_ID, 10)
+      .then((response) => {
+        if (!active) return;
+        setData(response);
+        setError(null);
+        setStatus("success");
+      })
+      .catch((err) => {
+        if (!active) return;
+        setData(null);
+        setError(
+          err?.message ?? "Unable to load recommendations. Please try again."
+        );
+        setStatus("error");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  useEffect(() => {
+    let active = true;
+
+    fetchStudentProfile(DEMO_PROFILE_ID)
+      .then((response) => {
+        if (active) setProfile(flattenBackendProfile(response.profile));
+      })
+      .catch(() => {
+        if (active) setProfile(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const refetch = useCallback(() => {
+    setStatus("loading");
+    setData(null);
+    setError(null);
+    setAttempt((n) => n + 1);
+  }, []);
+
+  const summaryItems = profile
+    ? [
+        { label: "CGPA", value: profile.cgpa || "Not set" },
+        {
+          label: "Skills",
+          value: profile.skills?.length
+            ? `${profile.skills.length} listed`
+            : "None listed",
+        },
+        { label: "Projects", value: profile.projectsCount },
+        { label: "Internships", value: profile.internshipsCount },
+        { label: "Certifications", value: profile.certificationsCount },
+        { label: "College Tier", value: profile.collegeTierDisplay || "Not set" },
+      ]
+    : [];
 
   return (
     <div className="companies-page">
@@ -39,57 +109,79 @@ function CompanyRecommendations() {
         </p>
       </div>
 
-      <div className="info-note">
-        <svg
-          className="info-note-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="16" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12.01" y2="8" />
-        </svg>
-        <span>
-          <strong>Demo Recommendation:</strong> Matches are calculated with a
-          simple skill comparison (matched skills / required skills) on demo
-          data. This is not an ML recommendation model and will be replaced
-          once the backend API is integrated.
-        </span>
-      </div>
-
-      <section className="analysis-section">
-        <h2>
-          <IconMark name="profile" className="section-title-icon" />
-          <span>Student Profile Summary</span>
-        </h2>
-
-        <div className="profile-grid profile-grid-6">
-          {summaryItems.map((item) => (
-            <div key={item.label} className="profile-item">
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-            </div>
-          ))}
+      {/* =========================================
+          LOADING STATE
+          ========================================= */}
+      {status === "loading" && (
+        <div className="profile-section profile-loading">
+          <div className="spinner" aria-hidden="true"></div>
+          <p>Loading company recommendations...</p>
         </div>
-      </section>
+      )}
 
-      <section className="analysis-section">
-        <h2>
-          <IconMark name="placement" className="section-title-icon" />
-          <span>Recommended Companies</span>
-        </h2>
-
-        <div className="company-grid">
-          {recommendations.map((company) => (
-            <CompanyCard key={company.id} company={company} />
-          ))}
+      {/* =========================================
+          ERROR STATE
+          ========================================= */}
+      {status === "error" && (
+        <div className="profile-section profile-error-state">
+          <div className="error-banner" role="alert">
+            {error}
+          </div>
+          <button type="button" className="dash-btn primary" onClick={refetch}>
+            Retry
+          </button>
         </div>
-      </section>
+      )}
+
+      {/* =========================================
+          BACKEND-DERIVED RECOMMENDATIONS
+          (no demo fallback: nothing renders without backend data)
+          ========================================= */}
+      {status === "success" && data && (
+        <>
+          {summaryItems.length > 0 && (
+            <section className="analysis-section">
+              <h2>
+                <IconMark name="profile" className="section-title-icon" />
+                <span>Student Profile Summary</span>
+              </h2>
+
+              <div className="profile-grid profile-grid-6">
+                {summaryItems.map((item) => (
+                  <div key={item.label} className="profile-item">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {RECOMMENDATION_GROUPS.map(({ key, title, icon }) => {
+            const items = Array.isArray(data.recommendations?.[key])
+              ? data.recommendations[key]
+              : [];
+
+            /* Empty groups are not rendered. */
+            if (items.length === 0) return null;
+
+            return (
+              <section className="analysis-section" key={key}>
+                <h2>
+                  <IconMark name={icon} className="section-title-icon" />
+                  <span>{title}</span>
+                </h2>
+
+                <div className="company-grid">
+                  {items.map((company) => (
+                    <CompanyCard key={company?.company_id ?? company?.company_name} company={company} />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }

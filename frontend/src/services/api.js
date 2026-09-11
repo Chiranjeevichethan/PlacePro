@@ -198,6 +198,94 @@ export async function fetchStudentReadiness(profileId) {
   return data;
 }
 
+/**
+ * Fetch ranked company recommendations for a profile.
+ *
+ * GET /api/profile/{id}/recommendations?limit=... -> RecommendationsResponse:
+ *   {
+ *     profile_id,
+ *     recommendations: {
+ *       recommended:      [RecommendationItem],  // backend-ranked
+ *       eligible:         [RecommendationItem],
+ *       incomplete:       [RecommendationItem],
+ *       not_recommended:  [RecommendationItem]
+ *     }
+ *   }
+ *
+ * RecommendationItem (all fields consumed defensively; only the first five
+ * are required by the backend schema):
+ *   company_id, company_name, status, recommendation_score (0-100),
+ *   eligibility_status, skill_match { score, required_matched,
+ *   required_missing, preferred_matched, preferred_missing },
+ *   readiness_score, readiness_level, placement_probability (0-1 | null),
+ *   reasons[], improvement_actions[], missing_information[]
+ *
+ * The backend is authoritative: companies, ordering, and every score come
+ * from the response — nothing is computed or substituted here.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchCompanyRecommendations(profileId, limit) {
+  const params = new URLSearchParams();
+  if (Number.isFinite(Number(limit)) && limit !== null && limit !== undefined) {
+    params.set("limit", String(Math.round(Number(limit))));
+  }
+  const query = params.toString();
+
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/recommendations${
+        query ? `?${query}` : ""
+      }`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the recommendations service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Company recommendations were not found.");
+    }
+
+    throw new Error("Unable to load recommendations. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to load recommendations. Please try again.");
+  }
+
+  /* Malformed 200: validate the required structure instead of substituting
+     demo companies or empty groups. */
+  const groups = data?.recommendations;
+  const hasValidGroup = (value) =>
+    value === undefined || value === null || Array.isArray(value);
+
+  if (
+    !data ||
+    typeof data !== "object" ||
+    typeof data.profile_id !== "string" ||
+    !groups ||
+    typeof groups !== "object" ||
+    !hasValidGroup(groups.recommended) ||
+    !hasValidGroup(groups.eligible) ||
+    !hasValidGroup(groups.incomplete) ||
+    !hasValidGroup(groups.not_recommended)
+  ) {
+    throw new Error(
+      "The recommendations service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
 /** Readable labels for backend validation fields (HTTP 422 messages). */
 const FIELD_LABELS = {
   branch: "Branch",

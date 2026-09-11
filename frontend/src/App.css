@@ -5601,6 +5601,17 @@ body {
   color: var(--text);
 }
 
+/* Phase 4D: backend reasons / improvement actions / missing information. */
+.company-detail-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
 /* ---------- Skill gap page ---------- */
 
 .skillgap-role-card {
