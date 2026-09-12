@@ -6474,3 +6474,179 @@ body {
     width: 100%;
   }
 }
+
+/* ================================
+   COMPANY ELIGIBILITY (Phase 4E)
+   Reuses the existing design tokens, company cards, and skill chips.
+   ================================ */
+
+/* ---------- Summary counts row ---------- */
+
+.eligibility-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.eligibility-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.eligibility-count strong {
+  font-weight: 700;
+}
+
+.eligibility-count.passed {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.eligibility-count.failed {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.eligibility-count.unknown {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* ---------- Requirement rows (detail view) ---------- */
+
+.eligibility-requirement-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eligibility-requirement {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.eligibility-requirement.passed {
+  border-left-color: var(--success);
+}
+
+.eligibility-requirement.failed {
+  border-left-color: var(--danger);
+}
+
+.eligibility-requirement.unknown {
+  border-left-color: var(--warning);
+}
+
+.eligibility-requirement-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.eligibility-requirement-name {
+  font-size: 13.5px;
+  color: var(--text);
+  margin-right: auto;
+}
+
+.eligibility-requirement-status {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.eligibility-requirement-status.passed {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.eligibility-requirement-status.failed {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.eligibility-requirement-status.unknown {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.eligibility-requirement-preferred {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.eligibility-requirement-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.eligibility-value-pair {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.eligibility-value-label {
+  color: var(--text-faint);
+}
+
+.eligibility-value-pair strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.eligibility-requirement-explanation,
+.eligibility-requirement-action {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.eligibility-requirement-action {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ---------- Detail loading / error ---------- */
+
+.eligibility-detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+  margin: 4px 0;
+}
+
+.eligibility-detail-error .error-banner {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 560px) {
+  .eligibility-requirement-values {
+    flex-direction: column;
+    gap: 6px;
+  }
+}

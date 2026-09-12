@@ -6,6 +6,7 @@ const menuItems = [
   { page: "prediction", label: "Placement Prediction", icon: "prediction" },
   { page: "salary", label: "Salary Prediction", icon: "salary" },
   { page: "companies", label: "Company Recommendations", icon: "company" },
+  { page: "eligibility", label: "Company Eligibility", icon: "objective" },
   { page: "skillgap", label: "Skill Gap Analysis", icon: "skills" },
   { page: "mocktests", label: "Mock Tests", icon: "mocktest" },
   { page: "profile", label: "Student Profile", icon: "profile" },

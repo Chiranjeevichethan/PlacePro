@@ -5,6 +5,11 @@
  * "placepro-final-v1") at POST /api/predict and normalizes the response
  * for the UI. The backend result is authoritative: no probability,
  * confidence, or model-version values are computed in the frontend.
+ *
+ * Phase 4E adds company eligibility (GET /api/profile/{id}/eligibility[...]).
+ * The backend is likewise authoritative there: statuses, requirement
+ * buckets, counts, and reasons are displayed as returned — the frontend
+ * never recomputes eligibility.
  */
 
 const API_BASE_URL =
@@ -456,6 +461,161 @@ function normalizePredictionResponse(data) {
     confidence: Math.round(confidenceValue * 100),
     modelVersion: data.model_version ?? null,
   };
+}
+
+/* ================================================================
+   COMPANY ELIGIBILITY (Phase 4E)
+   ================================================================ */
+
+/**
+ * Fetch grouped company eligibility for a profile.
+ *
+ * GET /api/profile/{profileId}/eligibility ->
+ *   {
+ *     eligible:     [CompanyEligibilitySummary],
+ *     not_eligible: [CompanyEligibilitySummary],
+ *     incomplete:   [CompanyEligibilitySummary]
+ *   }
+ *
+ * CompanyEligibilitySummary:
+ *   company { company_id, company_name, industry, roles[] },
+ *   status ("ELIGIBLE" | "NOT_ELIGIBLE" | "INCOMPLETE"),
+ *   passed_count, failed_count, unknown_count, major_reasons[]
+ *
+ * Group membership, statuses, counts, and reasons come from the
+ * backend and are displayed as-is — nothing is recomputed here.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchCompanyEligibility(profileId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/eligibility`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the eligibility service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Company eligibility was not found.");
+    }
+
+    throw new Error("Unable to load company eligibility. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to load company eligibility. Please try again.");
+  }
+
+  /* Malformed 200: validate the required structure instead of
+     substituting empty groups. */
+  const hasValidGroup = (value) =>
+    value === undefined || value === null || Array.isArray(value);
+
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !hasValidGroup(data.eligible) ||
+    !hasValidGroup(data.not_eligible) ||
+    !hasValidGroup(data.incomplete)
+  ) {
+    throw new Error(
+      "The eligibility service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Fetch transparent eligibility details for one profile/company pair.
+ *
+ * GET /api/profile/{profileId}/eligibility/{companyId} ->
+ *   {
+ *     company_id, company_name,
+ *     status ("ELIGIBLE" | "NOT_ELIGIBLE" | "INCOMPLETE"),
+ *     requirements { passed[], failed[], unknown[] },   // RequirementResult
+ *     missing_information[] (optional), explanation[] (optional)
+ *   }
+ *
+ * RequirementResult:
+ *   requirement, student_value (number|string|null),
+ *   required_value (number|string|null|array), status (PASS|FAIL|UNKNOWN),
+ *   mandatory, explanation, action (string|null)
+ *
+ * The requirement buckets, statuses, values, explanations, and actions are
+ * backend-authoritative and displayed as-is. Throws an Error with a
+ * user-readable message on any failure.
+ */
+export async function fetchCompanyEligibilityDetail(profileId, companyId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(
+        profileId
+      )}/eligibility/${encodeURIComponent(companyId)}`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the eligibility service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Company eligibility details were not found.");
+    }
+
+    throw new Error(
+      "Unable to load company eligibility details. Please try again."
+    );
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      "Unable to load company eligibility details. Please try again."
+    );
+  }
+
+  /* Malformed 200: validate the required structure. requirements is the
+     heart of the response — its three buckets must be arrays (missing
+     buckets are tolerated as absent, matching the backend's optional
+     semantics, but a wrong type is an error, never an empty substitute). */
+  const requirements = data?.requirements;
+  const bucketIsValid = (value) =>
+    value === undefined || value === null || Array.isArray(value);
+
+  if (
+    !data ||
+    typeof data !== "object" ||
+    typeof data.company_id !== "string" ||
+    typeof data.company_name !== "string" ||
+    typeof data.status !== "string" ||
+    !requirements ||
+    typeof requirements !== "object" ||
+    !bucketIsValid(requirements.passed) ||
+    !bucketIsValid(requirements.failed) ||
+    !bucketIsValid(requirements.unknown)
+  ) {
+    throw new Error(
+      "The eligibility service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
 }
 
 /**
