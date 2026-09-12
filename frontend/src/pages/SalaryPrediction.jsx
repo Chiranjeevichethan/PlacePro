@@ -1,42 +1,92 @@
 /**
- * Salary Prediction page (Phase 2).
+ * Salary Prediction page (Phase 5C).
  *
- * DEMO FEATURE: the estimate comes from a transparent deterministic formula in
- * services/salaryPrediction.js - it is NOT a trained ML model and shows no
- * accuracy metrics. A real salary model API can replace the service later
- * without changing this page.
+ * REAL BACKEND FEATURE: the estimate comes from POST /api/salary-predict
+ * (Ridge regression model "placepro-salary-v1", trained on PLACED students
+ * only) via services/salaryPrediction.js. The backend response is
+ * authoritative: no salary value, range, confidence, or factor weight is
+ * computed, substituted, or hard-coded in the frontend.
  *
- * Profile fields (CGPA, preferred role, skills, projects, internships,
- * certifications) are PREFILLED from the existing student profile
- * (localStorage "placepro_profile" via useProfile). Edits here stay LOCAL to
- * this page and never write back to the main profile - no second profile
- * system is created.
+ * The form collects exactly the 16 model inputs and is PREFILLED from the
+ * existing student profile (localStorage "placepro_profile" via useProfile).
+ * Edits here stay LOCAL to this page and never write back to the main
+ * profile - no second profile system is created.
+ *
+ * The salary estimate is conditional on placement: the page labels it as an
+ * estimate and states that it is not a guaranteed offer.
  */
 import { useState } from "react";
-import IconMark from "../components/IconMark";
-import { predictSalary, formatLpa, COMPANY_TYPE_OPTIONS } from "../services/salaryPrediction";
-import { ROLE_SKILLS } from "../data/recommendationData";
+import { predictSalary, formatLpa } from "../services/salaryPrediction";
+import { BRANCH_OPTIONS, TIER_OPTIONS } from "../services/profileConfig";
 import useProfile from "../hooks/useProfile";
 
-const ROLE_OPTIONS = Object.keys(ROLE_SKILLS);
+/**
+ * Numeric model inputs with the sanity bounds mirrored from the profile
+ * editor (EDIT_RANGES). The backend remains authoritative for validation -
+ * any stricter range it enforces comes back as a readable HTTP 422 message.
+ */
+const NUMERIC_FIELDS = [
+  { name: "cgpa", label: "CGPA (0 - 10)", min: 0, max: 10, step: "0.01", placeholder: "0 - 10" },
+  { name: "backlogs", label: "Backlogs", min: 0, step: "1", placeholder: "e.g. 0" },
+  { name: "codingSkills", label: "Coding Skill (0 - 10)", min: 0, max: 10, step: "0.1", placeholder: "0 - 10" },
+  { name: "dsaScore", label: "DSA Score (0 - 10)", min: 0, max: 10, step: "0.1", placeholder: "0 - 10" },
+  { name: "aptitudeScore", label: "Aptitude Score (0 - 100)", min: 0, max: 100, step: "1", placeholder: "0 - 100" },
+  { name: "communicationSkills", label: "Communication Skill (0 - 10)", min: 0, max: 10, step: "0.1", placeholder: "0 - 10" },
+  { name: "mlKnowledge", label: "ML Knowledge (0 - 10)", min: 0, max: 10, step: "0.1", placeholder: "0 - 10" },
+  { name: "systemDesign", label: "System Design (0 - 10)", min: 0, max: 10, step: "0.1", placeholder: "0 - 10" },
+  { name: "internships", label: "Internships", min: 0, step: "1", placeholder: "e.g. 0" },
+  { name: "projects", label: "Projects", min: 0, step: "1", placeholder: "e.g. 0" },
+  { name: "certifications", label: "Certifications", min: 0, step: "1", placeholder: "e.g. 0" },
+  { name: "hackathons", label: "Hackathons", min: 0, step: "1", placeholder: "e.g. 0" },
+  { name: "openSourceContributions", label: "Open Source Contributions (0 - 2)", min: 0, max: 2, step: "1", placeholder: "0 - 2" },
+  { name: "extracurriculars", label: "Extracurricular Activities (0 - 3)", min: 0, max: 3, step: "1", placeholder: "0 - 3" },
+];
+
+/** Prefill the 16 model inputs from the flat student profile mirror. */
+const buildInitialForm = (profile) => ({
+  branch: profile.branch || "",
+  collegeTier: profile.collegeTier || "",
+  cgpa: profile.cgpa || "",
+  backlogs: profile.backlogs || "",
+  codingSkills: profile.codingSkills || "",
+  dsaScore: profile.dsaScore || "",
+  aptitudeScore: profile.aptitudeScore || "",
+  communicationSkills: profile.communicationSkills || "",
+  mlKnowledge: profile.mlKnowledge || "",
+  systemDesign: profile.systemDesign || "",
+  internships: profile.internshipsCount
+    ? String(profile.internshipsCount)
+    : "",
+  projects: profile.projectsCount ? String(profile.projectsCount) : "",
+  certifications: profile.certificationsCount
+    ? String(profile.certificationsCount)
+    : "",
+  hackathons: profile.hackathonsCount ? String(profile.hackathonsCount) : "",
+  openSourceContributions: profile.openSourceContributions || "",
+  extracurriculars: profile.extracurriculars || "",
+});
 
 function SalaryPrediction() {
   const profile = useProfile();
 
-  const [form, setForm] = useState(() => ({
-    cgpa: profile.cgpa || "",
-    preferredRole: profile.preferredRole || ROLE_OPTIONS[0],
-    skills: profile.skills || "",
-    projects: profile.projects || "",
-    internships: profile.internships || "",
-    certifications: profile.certifications || "",
-    experience: "",
-    companyType: "Any",
-  }));
+  const [form, setForm] = useState(() => buildInitialForm(profile));
   const [errors, setErrors] = useState({});
   const [result, setResult] = useState(null);
   const [isEstimating, setIsEstimating] = useState(false);
   const [error, setError] = useState(null);
+
+  /* The stored profile usually holds a canonical branch ("CSE"), but older
+     mirrors may hold a legacy spelling ("Information Science and
+     Engineering"). Keep it selectable; the service maps it to "CSE". */
+  const branchOptions =
+    form.branch && !BRANCH_OPTIONS.some((option) => option.value === form.branch)
+      ? [{ value: form.branch, label: form.branch }, ...BRANCH_OPTIONS]
+      : BRANCH_OPTIONS;
+
+  const tierOptions =
+    form.collegeTier && !TIER_OPTIONS.some((option) => option.value === form.collegeTier)
+      ? [{ value: form.collegeTier, label: form.collegeTier }, ...TIER_OPTIONS]
+      : TIER_OPTIONS;
 
   const setField = (name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -46,41 +96,39 @@ function SalaryPrediction() {
       delete next[name];
       return next;
     });
+    // A changed input invalidates the previous failed attempt's message.
+    setError(null);
   };
 
   const validate = (data) => {
     const next = {};
-    const numeric = (value) => value !== "" && Number.isFinite(Number(value));
 
-    if (
-      !numeric(data.cgpa) ||
-      Number(data.cgpa) < 0 ||
-      Number(data.cgpa) > 10
-    ) {
-      next.cgpa = "CGPA must be between 0 and 10.";
+    if (!data.branch) {
+      next.branch = "Please select a branch.";
+    }
+    if (!data.collegeTier) {
+      next.collegeTier = "Please select a college tier.";
     }
 
-    if (!ROLE_OPTIONS.includes(data.preferredRole)) {
-      next.preferredRole = "Please select a valid role.";
-    }
+    NUMERIC_FIELDS.forEach(({ name, label, min, max }) => {
+      const raw = data[name];
+      const value = Number(raw);
 
-    [
-      ["projects", "Projects"],
-      ["internships", "Internships"],
-      ["certifications", "Certifications"],
-      ["experience", "Experience"],
-    ].forEach(([field, label]) => {
-      if (!numeric(data[field]) || Number(data[field]) < 0) {
-        next[field] = `${label} must be 0 or greater.`;
+      if (raw === "" || raw === null || !Number.isFinite(value)) {
+        next[name] = `${label.replace(/\s*\(.*\)$/, "")} is required.`;
+      } else if (value < min) {
+        next[name] = `${label.replace(/\s*\(.*\)$/, "")} must be ${min} or greater.`;
+      } else if (max !== undefined && value > max) {
+        next[name] = `${label.replace(/\s*\(.*\)$/, "")} must be ${min} - ${max}.`;
       }
     });
 
     return next;
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const runPrediction = async () => {
     setError(null);
+    setResult(null);
 
     const next = validate(form);
     if (Object.keys(next).length > 0) {
@@ -92,13 +140,73 @@ function SalaryPrediction() {
     try {
       const estimate = await predictSalary(form);
       setResult(estimate);
-    } catch {
+    } catch (err) {
+      // Backend error messages are user-readable (422/503/500/network).
       setError(
-        "Something went wrong while estimating the salary. Please try again."
+        err?.message ??
+          "Unable to calculate the salary estimate. Please try again."
       );
     } finally {
       setIsEstimating(false);
     }
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    runPrediction();
+  };
+
+  const renderSelect = (name, label, options) => {
+    const hasError = Boolean(errors[name]);
+
+    return (
+      <div className="form-group" key={name}>
+        <label htmlFor={`salary-${name}`}>{label}</label>
+        <select
+          id={`salary-${name}`}
+          value={form[name]}
+          onChange={(event) => setField(name, event.target.value)}
+          className={hasError ? "invalid" : ""}
+        >
+          <option value="">Select</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {hasError && <span className="field-error">{errors[name]}</span>}
+      </div>
+    );
+  };
+
+  const renderNumberField = ({
+    name,
+    label,
+    min,
+    max,
+    step,
+    placeholder,
+  }) => {
+    const hasError = Boolean(errors[name]);
+
+    return (
+      <div className="form-group" key={name}>
+        <label htmlFor={`salary-${name}`}>{label}</label>
+        <input
+          id={`salary-${name}`}
+          type="number"
+          value={form[name]}
+          onChange={(event) => setField(name, event.target.value)}
+          placeholder={placeholder}
+          min={min}
+          max={max}
+          step={step}
+          className={hasError ? "invalid" : ""}
+        />
+        {hasError && <span className="field-error">{errors[name]}</span>}
+      </div>
+    );
   };
 
   return (
@@ -107,18 +215,9 @@ function SalaryPrediction() {
       <div className="page-header">
         <h1>Salary Prediction</h1>
         <p>
-          Estimate your potential salary based on your academic profile,
-          skills, experience, and career preferences.
+          Estimate your potential salary based on your academic profile and
+          technical skills.
         </p>
-      </div>
-
-      {/* DEMO NOTICE */}
-      <div className="demo-banner">
-        <span className="demo-chip">Demo Prediction</span>
-        <span>
-          This is a frontend demo. Connect a trained salary prediction
-          model/API for real predictions.
-        </span>
       </div>
 
       {/* INPUT FORM */}
@@ -131,140 +230,9 @@ function SalaryPrediction() {
 
         <form onSubmit={handleSubmit} noValidate>
           <div className="salary-form-grid">
-            <div className="form-group">
-              <label htmlFor="salary-cgpa">CGPA</label>
-              <input
-                id="salary-cgpa"
-                type="number"
-                value={form.cgpa}
-                onChange={(event) => setField("cgpa", event.target.value)}
-                placeholder="0 - 10"
-                step="0.01"
-                className={errors.cgpa ? "invalid" : ""}
-              />
-              {errors.cgpa && (
-                <span className="field-error">{errors.cgpa}</span>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="salary-role">Preferred Role</label>
-              <select
-                id="salary-role"
-                value={form.preferredRole}
-                onChange={(event) =>
-                  setField("preferredRole", event.target.value)
-                }
-              >
-                {ROLE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group salary-skills-field">
-              <label htmlFor="salary-skills">
-                Skills (comma separated)
-              </label>
-              <input
-                id="salary-skills"
-                type="text"
-                value={form.skills}
-                onChange={(event) => setField("skills", event.target.value)}
-                placeholder="e.g. Python, SQL, Excel"
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="salary-projects">Projects</label>
-              <input
-                id="salary-projects"
-                type="number"
-                value={form.projects}
-                onChange={(event) => setField("projects", event.target.value)}
-                placeholder="0 or greater"
-                min="0"
-                className={errors.projects ? "invalid" : ""}
-              />
-              {errors.projects && (
-                <span className="field-error">{errors.projects}</span>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="salary-internships">Internship Experience</label>
-              <input
-                id="salary-internships"
-                type="number"
-                value={form.internships}
-                onChange={(event) =>
-                  setField("internships", event.target.value)
-                }
-                placeholder="0 or greater"
-                min="0"
-                className={errors.internships ? "invalid" : ""}
-              />
-              {errors.internships && (
-                <span className="field-error">{errors.internships}</span>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="salary-certifications">Certifications</label>
-              <input
-                id="salary-certifications"
-                type="number"
-                value={form.certifications}
-                onChange={(event) =>
-                  setField("certifications", event.target.value)
-                }
-                placeholder="0 or greater"
-                min="0"
-                className={errors.certifications ? "invalid" : ""}
-              />
-              {errors.certifications && (
-                <span className="field-error">{errors.certifications}</span>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="salary-experience">
-                Relevant Experience (years)
-              </label>
-              <input
-                id="salary-experience"
-                type="number"
-                value={form.experience}
-                onChange={(event) =>
-                  setField("experience", event.target.value)
-                }
-                placeholder="0 or greater"
-                min="0"
-                className={errors.experience ? "invalid" : ""}
-              />
-              {errors.experience && (
-                <span className="field-error">{errors.experience}</span>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="salary-company">Target Company Type</label>
-              <select
-                id="salary-company"
-                value={form.companyType}
-                onChange={(event) =>
-                  setField("companyType", event.target.value)
-                }
-              >
-                {COMPANY_TYPE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {renderSelect("branch", "Branch", branchOptions)}
+            {renderSelect("collegeTier", "College Tier", tierOptions)}
+            {NUMERIC_FIELDS.map(renderNumberField)}
           </div>
 
           {Object.keys(errors).length > 0 && (
@@ -288,136 +256,65 @@ function SalaryPrediction() {
         </form>
       </div>
 
-      {/* ERROR */}
-      {error && (
-        <div className="error-banner" role="alert">
-          {error}
-        </div>
+      {/* ERROR + RETRY */}
+      {error && !isEstimating && (
+        <>
+          <div className="error-banner" role="alert">
+            {error}
+          </div>
+          <button
+            type="button"
+            className="dash-btn primary"
+            onClick={runPrediction}
+          >
+            Try Again
+          </button>
+        </>
       )}
 
       {/* LOADING */}
       {isEstimating && (
         <div className="prediction-result prediction-loading">
           <div className="spinner" aria-hidden="true"></div>
-          <p>Calculating demo salary estimate...</p>
+          <p>Calculating salary estimate...</p>
         </div>
       )}
 
       {/* RESULT CARD */}
       {result && !isEstimating && (
         <div className="prediction-result salary-result">
-          <h2>Estimated Salary (Demo)</h2>
+          <h2>Estimated Salary</h2>
 
           <div className="result-body">
             <div className="salary-result-top">
               <div className="salary-estimate">
                 <div className="prediction-percentage">
-                  {formatLpa(result.estimateLpa)}
+                  {formatLpa(result.predictedSalaryLpa)}
                 </div>
                 <div className="prediction-probability-label">
-                  Estimated Salary (Demo)
+                  Estimated Salary (LPA)
                 </div>
               </div>
 
               <div className="salary-meta">
+                {result.modelVersion && (
+                  <div className="salary-meta-row">
+                    <span>Model</span>
+                    <strong>{result.modelVersion}</strong>
+                  </div>
+                )}
                 <div className="salary-meta-row">
-                  <span>Salary Range (Demo)</span>
-                  <strong>
-                    {formatLpa(result.minLpa)} – {formatLpa(result.maxLpa)}
-                  </strong>
-                </div>
-                <div className="salary-meta-row">
-                  <span>Target Role</span>
-                  <strong>{result.role}</strong>
-                </div>
-                <div className="salary-meta-row">
-                  <span>Profile Strength</span>
-                  <span
-                    className={`rating-badge ${result.profileStrength.className}`}
-                  >
-                    {result.profileStrength.label}
-                  </span>
+                  <span>Source</span>
+                  <strong>Backend salary model</strong>
                 </div>
               </div>
-            </div>
-
-            <div className="salary-range-track">
-              <div
-                className="salary-range-fill"
-                style={{
-                  left: `${Math.max(0, (result.minLpa / (result.maxLpa * 1.05)) * 100)}%`,
-                  width: `${Math.min(
-                    100,
-                    ((result.maxLpa - result.minLpa) / (result.maxLpa * 1.05)) * 100
-                  )}%`,
-                }}
-              ></div>
-            </div>
-
-            <div className="salary-factors">
-              <h3>Key Positive Factors</h3>
-              {result.positiveFactors.length > 0 ? (
-                <ul className="salary-factor-list positive">
-                  {result.positiveFactors.map((factor) => (
-                    <li key={factor}>✓ {factor}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="skills-empty">
-                  No strong factors yet - fill in your details above.
-                </p>
-              )}
-
-              <h3>Improvement Areas</h3>
-              {result.improvementAreas.length > 0 ? (
-                <ul className="salary-factor-list improve">
-                  {result.improvementAreas.map((area) => (
-                    <li key={area}>• {area}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="skills-complete">
-                  All covered based on the entered details ✓
-                </p>
-              )}
             </div>
 
             <p className="prediction-data-note">
-              This is a demo estimation from a simple formula - not produced by
-              a trained ML model and not a guarantee of any actual offer.
+              Estimated salary based on your current profile. Actual offers may
+              vary. The salary estimate is conditional on placement and is not
+              a guaranteed offer.
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* FACTOR BREAKDOWN */}
-      {result && !isEstimating && (
-        <div className="dash-card salary-breakdown">
-          <div className="dash-card-header">
-            <IconMark name="accuracy" className="dash-card-icon blue" />
-            <h2>Demo Estimation Factors</h2>
-          </div>
-
-          <p className="dash-card-note">
-            Input strength relative to the demo formula's caps - not statistical
-            importance.
-          </p>
-
-          <div className="bar-list">
-            {result.factorBreakdown.map((factor) => (
-              <div key={factor.label} className="bar-row">
-                <div className="bar-row-header">
-                  <span>{factor.label}</span>
-                  <strong>{factor.detail}</strong>
-                </div>
-                <div className="progress-track">
-                  <div
-                    className="progress-fill salary-factor-fill"
-                    style={{ width: `${factor.level}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}

@@ -618,6 +618,175 @@ export async function fetchCompanyEligibilityDetail(profileId, companyId) {
   return data;
 }
 
+/* ================================================================
+   SALARY PREDICTION (Phase 5C)
+   ================================================================ */
+
+/**
+ * Branch synonyms for the salary model request. Reuses the placement
+ * mapping (BRANCH_SYNONYMS, "Information Science" -> "CSE") and adds the
+ * Information-Science family spellings that can appear in profile data.
+ * Canonical backend branch values are: CSE, IT, ECE, EE, ME, CE, Chemical.
+ */
+const SALARY_BRANCH_SYNONYMS = {
+  ...BRANCH_SYNONYMS,
+  ISE: "CSE",
+  "Information Science and Engineering": "CSE",
+};
+
+/**
+ * College-tier spellings that can appear in profile data -> canonical
+ * backend values (Tier-1 / Tier-2 / Tier-3). Reuses the placement form's
+ * "1" | "2" | "3" mapping and adds the display spellings.
+ */
+const SALARY_COLLEGE_TIERS = {
+  ...COLLEGE_TIERS,
+  "Tier 1": "Tier-1",
+  "Tier 2": "Tier-2",
+  "Tier 3": "Tier-3",
+};
+
+const mapSalaryBranch = (branch) => SALARY_BRANCH_SYNONYMS[branch] ?? branch;
+
+const mapSalaryCollegeTier = (tier) => SALARY_COLLEGE_TIERS[tier] ?? tier;
+
+/**
+ * Map the salary form data (prefilled from the student profile) to the
+ * EXACT 16 model fields expected by POST /api/salary-predict. Nothing else
+ * is sent - in particular no student id, placement status, or stored
+ * salary value:
+ *
+ *   branch                     <- branch (canonical or ISE family -> "CSE")
+ *   college_tier               <- collegeTier (canonical or "Tier 2" -> "Tier-2")
+ *   cgpa                       <- cgpa
+ *   backlogs                   <- backlogs
+ *   coding_skills              <- codingSkills      (profile 0-10 scale)
+ *   dsa_score                  <- dsaScore
+ *   aptitude_score             <- aptitudeScore
+ *   communication_skills       <- communicationSkills (profile 0-10 scale)
+ *   ml_knowledge               <- mlKnowledge
+ *   system_design              <- systemDesign
+ *   internships                <- internships
+ *   projects_count             <- projects
+ *   certifications             <- certifications
+ *   hackathons                 <- hackathons
+ *   open_source_contributions  <- openSourceContributions
+ *   extracurriculars           <- extracurriculars
+ *
+ * Unlike the placement form, coding_skills / communication_skills arrive on
+ * the profile's existing 0-10 scale and are sent unchanged. All values are
+ * real numbers (never numeric strings, null, or NaN); count fields are
+ * rounded to integers. Categorical encoding is left to the backend
+ * pipeline - raw strings are sent.
+ */
+export function buildSalaryPayload(formData) {
+  return {
+    branch: mapSalaryBranch(formData.branch),
+    college_tier: mapSalaryCollegeTier(formData.collegeTier),
+    cgpa: toNumber(formData.cgpa),
+    backlogs: toInteger(formData.backlogs),
+    coding_skills: toNumber(formData.codingSkills),
+    dsa_score: toNumber(formData.dsaScore),
+    aptitude_score: toNumber(formData.aptitudeScore),
+    communication_skills: toNumber(formData.communicationSkills),
+    ml_knowledge: toNumber(formData.mlKnowledge),
+    system_design: toNumber(formData.systemDesign),
+    internships: toInteger(formData.internships),
+    projects_count: toInteger(formData.projects),
+    certifications: toInteger(formData.certifications),
+    hackathons: toInteger(formData.hackathons),
+    open_source_contributions: toInteger(formData.openSourceContributions),
+    extracurriculars: toInteger(formData.extracurriculars),
+  };
+}
+
+/**
+ * POST /api/salary-predict with the validated 16-field payload.
+ *
+ * The backend salary model (placepro-salary-v1) is a Ridge regression
+ * trained on PLACED students only, so its estimate is conditional on
+ * placement. The response is authoritative:
+ *   { predicted_salary_lpa: number, model_version: string }
+ *
+ * Returns { predictedSalaryLpa: number, modelVersion: string | null }.
+ * Throws an Error with a user-readable message on any failure (network,
+ * 422 validation, 503 unavailable, 500, or malformed response body).
+ */
+export async function requestSalaryPrediction(payload) {
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/salary-predict`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new Error(
+      "Cannot reach the salary prediction service. Please make sure the backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 422) {
+      let detail = null;
+
+      try {
+        const body = await response.json();
+        detail = body?.detail ?? null;
+      } catch {
+        // Body could not be parsed; fall back to the generic message below.
+      }
+
+      throw new Error(formatValidationError(detail));
+    }
+
+    if (response.status === 503) {
+      throw new Error(
+        "Salary prediction service is currently unavailable. Please try again later."
+      );
+    }
+
+    if (response.status === 500) {
+      throw new Error(
+        "Unable to calculate the salary estimate. Please try again."
+      );
+    }
+
+    throw new Error(
+      `Salary prediction request failed (HTTP ${response.status}). Please try again.`
+    );
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      "The salary prediction service returned an unexpected response. Please try again."
+    );
+  }
+
+  /* Malformed 200: validate the required value instead of displaying
+     undefined/NaN or substituting an invented salary. */
+  const salaryValue = toNumber(data?.predicted_salary_lpa);
+
+  if (!Number.isFinite(salaryValue)) {
+    throw new Error(
+      "The salary prediction service returned an unexpected response. Please try again."
+    );
+  }
+
+  return {
+    predictedSalaryLpa: salaryValue,
+    modelVersion:
+      typeof data.model_version === "string" ? data.model_version : null,
+  };
+}
+
 /**
  * Request a placement prediction from the production backend.
  * Throws an Error with a user-readable message on any failure.
