@@ -1,19 +1,23 @@
 /**
- * Mock Tests page (Phase 3).
+ * Mock Tests page (Phase 6B, Step 3).
  *
- * Flow: setup -> running test (timer + navigator) -> confirmation -> result.
+ * REAL assessment flow: setup -> running test (timer + navigator) ->
+ * confirmation -> submitting -> result.
  *
- * DEMO FEATURE: questions come from src/data/mockTestData.js and scoring
- * happens locally (src/services/mockTest.js). A real question database/API
- * will be connected later - the service is shaped for a 1:1 swap.
+ * The backend is authoritative: questions come from the real assessment
+ * API (see src/services/mockTest.js over src/services/api.js), and the
+ * official score/level/breakdowns come only from the submit response —
+ * nothing is scored or reshaped here.
  *
  * State machine: "setup" | "running" | "finished".
  * - While running, <TestRunner> owns answers/index/timer state. Its `key`
  *   is the attempt id, so Start and Retake remount it fresh: no answers or
  *   timer ever leak between attempts.
+ * - The countdown is a CLIENT-SIDE CONVENIENCE only; the backend does not
+ *   enforce timing (time_limit_minutes is null).
  * - Leaving the page unmounts everything, so no stale test state remains.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import useTestTimer from "../hooks/useTestTimer";
 import TestTimer from "../components/TestTimer";
 import QuestionCard from "../components/QuestionCard";
@@ -21,22 +25,59 @@ import QuestionNavigator from "../components/QuestionNavigator";
 import TestResult from "../components/TestResult";
 import {
   getMockQuestions,
-  getSubjects,
-  getDifficulties,
-  scoreTest,
+  submitMockTest,
   formatDuration,
   SECONDS_PER_QUESTION,
 } from "../services/mockTest";
-import { COUNT_OPTIONS } from "../data/mockTestData";
+import { DEMO_PROFILE_ID } from "../services/profileConfig";
 
-const SUBJECT_OPTIONS = getSubjects();
-const DIFFICULTY_OPTIONS = getDifficulties();
+/**
+ * Backend canonical skills (the question bank's 12 skills). There is no
+ * tests-list endpoint yet, so this exact list is used for the selector.
+ */
+const SKILL_OPTIONS = [
+  "Python",
+  "Java",
+  "C",
+  "C++",
+  "JavaScript",
+  "SQL",
+  "Data Structures",
+  "Algorithms",
+  "React",
+  "Machine Learning",
+  "HTML/CSS",
+  "Git",
+];
+
+/** Backend num_questions allows 1-10. */
+const COUNT_OPTIONS = [5, 10];
+
+/**
+ * Map a thrown service error to a user-readable message. The service
+ * layer already produces readable text; this only catches unexpected
+ * values so no stack trace or raw error object is ever rendered.
+ */
+const toReadableError = (error) =>
+  error instanceof Error && error.message
+    ? error.message
+    : "Unable to process the assessment. Please try again.";
 
 /**
  * Internal running-test view. Remounted for every attempt (keyed by the
  * attempt id) so the timer and answers always start clean.
  */
-function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, onExit }) {
+function TestRunner({
+  skill,
+  questions,
+  totalSeconds,
+  submitting,
+  submitError,
+  onRetrySubmit,
+  onFinish,
+  onExit,
+  latestAnswersRef,
+}) {
   const [answers, setAnswers] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
@@ -47,8 +88,9 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
     [onFinish, answers]
   );
 
-  // Timer runs for the whole attempt; expiry auto-submits with the latest
-  // answers (the hook keeps the callback in a ref, so this is never stale).
+  // Client-side convenience countdown for the whole attempt; expiry
+  // auto-submits the latest answers (the hook keeps the callback in a ref,
+  // so this is never stale). Not server-enforced.
   const timer = useTestTimer({
     totalSeconds,
     active: true,
@@ -58,7 +100,11 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
   const handleSelectOption = (optionIndex) => {
     const question = questions[currentIndex];
     if (!question) return;
-    setAnswers((prev) => ({ ...prev, [question.id]: optionIndex }));
+    setAnswers((prev) => {
+      const next = { ...prev, [question.question_id]: optionIndex };
+      latestAnswersRef.current = next; // keep retry payload in sync
+      return next;
+    });
   };
 
   const answeredCount = Object.keys(answers).length;
@@ -67,10 +113,8 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
     <div className="test-running">
       <div className="test-running-header">
         <div>
-          <span className="test-running-eyebrow">Demo Test</span>
-          <h1>
-            {subject} - {difficulty}
-          </h1>
+          <span className="test-running-eyebrow">Mock Test</span>
+          <h1>{skill}</h1>
         </div>
         <div className="test-running-side">
           <TestTimer secondsLeft={timer.secondsLeft} totalSeconds={totalSeconds} />
@@ -84,12 +128,21 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
         </div>
       </div>
 
+      {submitError && (
+        <div className="error-banner" role="alert">
+          <span>{submitError}</span>
+          <button type="button" className="dash-btn secondary" onClick={onRetrySubmit}>
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="test-running-layout">
         <QuestionCard
           question={questions[currentIndex]}
           index={currentIndex}
           total={questions.length}
-          selectedOption={answers[questions[currentIndex].id]}
+          selectedOption={answers[questions[currentIndex].question_id]}
           onSelectOption={handleSelectOption}
           onPrevious={() => setCurrentIndex((index) => Math.max(0, index - 1))}
           onNext={() =>
@@ -104,7 +157,7 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
           total={questions.length}
           currentIndex={currentIndex}
           answers={answers}
-          questionIds={questions.map((q) => q.id)}
+          questionIds={questions.map((q) => q.question_id)}
           onJump={(index) => setCurrentIndex(index)}
         />
       </div>
@@ -113,7 +166,9 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
       {showSubmitConfirm && (
         <div
           className="modal-overlay"
-          onClick={() => setShowSubmitConfirm(false)}
+          onClick={() => {
+            if (!submitting) setShowSubmitConfirm(false);
+          }}
           role="presentation"
         >
           <div
@@ -128,8 +183,9 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
             </div>
 
             <p className="confirm-text">
-              You have answered {answeredCount} of {questions.length} questions.
-              Are you sure you want to submit?
+              {submitting
+                ? "Submitting your answers..."
+                : `You have answered ${answeredCount} of ${questions.length} questions. Are you sure you want to submit?`}
             </p>
 
             <div className="modal-actions">
@@ -137,6 +193,7 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
                 type="button"
                 className="dash-btn secondary"
                 onClick={() => setShowSubmitConfirm(false)}
+                disabled={submitting}
               >
                 Cancel
               </button>
@@ -144,8 +201,9 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
                 type="button"
                 className="dash-btn primary"
                 onClick={() => finishRef(false)}
+                disabled={submitting}
               >
-                Submit Test
+                {submitting ? "Submitting..." : "Submit Test"}
               </button>
             </div>
           </div>
@@ -196,53 +254,116 @@ function TestRunner({ subject, difficulty, questions, totalSeconds, onFinish, on
 
 function MockTests() {
   const [phase, setPhase] = useState("setup");
-  const [subject, setSubject] = useState(SUBJECT_OPTIONS[0]);
-  const [difficulty, setDifficulty] = useState("Easy");
+  const [skill, setSkill] = useState(SKILL_OPTIONS[0]);
   const [count, setCount] = useState(5);
 
   const [attemptId, setAttemptId] = useState(0);
+  const [assessmentId, setAssessmentId] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [startedAt, setStartedAt] = useState(null);
   const [timeTaken, setTimeTaken] = useState(null);
   const [autoSubmitted, setAutoSubmitted] = useState(false);
   const [result, setResult] = useState(null);
 
-  const availableCount = useMemo(
-    () => getMockQuestions(subject, difficulty, Number.MAX_SAFE_INTEGER).length,
-    [subject, difficulty]
-  );
+  // Request lifecycle for both start and submit.
+  const [starting, setStarting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
-  const effectiveCount = Math.min(count, availableCount);
-  const totalSeconds = Math.max(60, effectiveCount * SECONDS_PER_QUESTION);
+  // Synchronous guard so a timer-expiry auto-submit and a manual submit
+  // click can never call submitMockTest twice for the same assessment.
+  const submittingRef = useRef(false);
+
+  // Mirrors the runner's current answers so a failed submission can be
+  // retried without losing what the student has selected.
+  const latestAnswersRef = useRef({});
+
+  const totalSeconds = Math.max(60, count * SECONDS_PER_QUESTION);
+
+  const handleStartTest = useCallback(async () => {
+    setError(null);
+    setStarting(true);
+    setResult(null);
+    setAutoSubmitted(false);
+
+    try {
+      // Starts a REAL backend assessment (also the retake path: a fresh
+      // assessment is created every time, never the previous one reused).
+      const assessment = await getMockQuestions(DEMO_PROFILE_ID, skill, count);
+
+      const backendQuestions = Array.isArray(assessment?.questions)
+        ? assessment.questions
+        : null;
+
+      if (
+        !assessment?.assessment_id ||
+        !backendQuestions ||
+        backendQuestions.length === 0
+      ) {
+        throw new Error(
+          "The assessment service returned no questions. Please try again."
+        );
+      }
+
+      setAssessmentId(assessment.assessment_id);
+      setQuestions(backendQuestions);
+      setStartedAt(Date.now());
+      setTimeTaken(null);
+      setAttemptId((id) => id + 1); // remounts TestRunner: fresh timer/answers
+      setPhase("running");
+    } catch (startError) {
+      setError(toReadableError(startError));
+    } finally {
+      setStarting(false);
+    }
+  }, [skill, count]);
+
+  const backToSetup = () => {
+    setPhase("setup");
+    setAssessmentId(null);
+    setQuestions([]);
+    setResult(null);
+    setAutoSubmitted(false);
+    setError(null);
+  };
 
   const finishTest = useCallback(
-    ({ byTime, answers }) => {
+    async ({ byTime, answers }) => {
+      if (submittingRef.current) return; // a submission is already in flight
+      submittingRef.current = true;
+
       const elapsed = startedAt
         ? Math.min(totalSeconds, Math.round((Date.now() - startedAt) / 1000))
         : totalSeconds;
       setTimeTaken(byTime ? totalSeconds : elapsed);
-      setResult(scoreTest(questions, answers));
-      setPhase("finished");
+      if (byTime) setAutoSubmitted(true);
+
+      setSubmitting(true);
+      setError(null);
+
+      try {
+        // The service converts option indexes to answer text and calls
+        // the backend; the returned result is authoritative and is stored
+        // as-is (no local score/percentage/breakdowns are computed).
+        const backendResult = await submitMockTest(
+          assessmentId,
+          questions,
+          answers,
+          DEMO_PROFILE_ID
+        );
+        setResult(backendResult);
+        setPhase("finished");
+      } catch (submitError) {
+        // Submission failed: stay in the running phase with the answers
+        // intact and let the runner show the error with a Retry option.
+        setError(toReadableError(submitError));
+      } finally {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     },
-    [questions, startedAt, totalSeconds]
+    [assessmentId, questions, startedAt, totalSeconds]
   );
-
-  const handleStartTest = () => {
-    setQuestions(getMockQuestions(subject, difficulty, effectiveCount));
-    setAutoSubmitted(false);
-    setStartedAt(Date.now());
-    setTimeTaken(null);
-    setResult(null);
-    setAttemptId((id) => id + 1); // remounts TestRunner: fresh timer/answers
-    setPhase("running");
-  };
-
-  const backToSetup = () => {
-    setPhase("setup");
-    setQuestions([]);
-    setResult(null);
-    setAutoSubmitted(false);
-  };
 
   return (
     <div className="mocktests-page">
@@ -257,44 +378,22 @@ function MockTests() {
             </p>
           </div>
 
-          <div className="demo-banner">
-            <span className="demo-chip">Demo Test</span>
-            <span>
-              These questions are frontend demo content. A real question
-              database/API will be connected later.
-            </span>
-          </div>
-
           <div className="prediction-card test-setup-card">
             <h2>Test Configuration</h2>
             <p className="form-description">
-              Choose a subject, difficulty, and the number of questions.
+              Choose a skill and the number of questions, then start the
+              assessment.
             </p>
 
             <div className="test-setup-grid">
               <div className="form-group">
-                <label htmlFor="test-subject">Subject</label>
+                <label htmlFor="test-skill">Skill</label>
                 <select
-                  id="test-subject"
-                  value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
+                  id="test-skill"
+                  value={skill}
+                  onChange={(event) => setSkill(event.target.value)}
                 >
-                  {SUBJECT_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="test-difficulty">Difficulty</label>
-                <select
-                  id="test-difficulty"
-                  value={difficulty}
-                  onChange={(event) => setDifficulty(event.target.value)}
-                >
-                  {DIFFICULTY_OPTIONS.map((option) => (
+                  {SKILL_OPTIONS.map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
@@ -320,23 +419,12 @@ function MockTests() {
 
             <div className="test-summary">
               <div className="test-summary-row">
-                <span>Subject</span>
-                <strong>{subject}</strong>
-              </div>
-              <div className="test-summary-row">
-                <span>Difficulty</span>
-                <strong>{difficulty}</strong>
+                <span>Skill</span>
+                <strong>{skill}</strong>
               </div>
               <div className="test-summary-row">
                 <span>Number of Questions</span>
-                <strong>
-                  {effectiveCount}
-                  {effectiveCount < count
-                    ? ` (only ${availableCount} demo question${
-                        availableCount === 1 ? "" : "s"
-                      } available)`
-                    : ""}
-                </strong>
+                <strong>{count}</strong>
               </div>
               <div className="test-summary-row">
                 <span>Estimated Time</span>
@@ -347,28 +435,46 @@ function MockTests() {
               </div>
             </div>
 
+            {error && (
+              <div className="error-banner" role="alert">
+                <span>{error}</span>
+                <button
+                  type="button"
+                  className="dash-btn secondary"
+                  onClick={handleStartTest}
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               className="predict-button"
               onClick={handleStartTest}
-              disabled={effectiveCount === 0}
+              disabled={starting}
             >
-              <span>Start Test</span>
+              <span>{starting ? "Starting Test..." : "Start Test"}</span>
             </button>
           </div>
         </>
       )}
 
       {/* ===================== RUNNING PHASE ===================== */}
-      {phase === "running" && questions.length > 0 && (
+      {phase === "running" && assessmentId && questions.length > 0 && (
         <TestRunner
           key={attemptId}
-          subject={subject}
-          difficulty={difficulty}
+          skill={skill}
           questions={questions}
           totalSeconds={totalSeconds}
+          submitting={submitting}
+          submitError={error}
+          onRetrySubmit={() =>
+            finishTest({ byTime: false, answers: latestAnswersRef.current })
+          }
           onFinish={finishTest}
           onExit={backToSetup}
+          latestAnswersRef={latestAnswersRef}
         />
       )}
 
@@ -377,13 +483,12 @@ function MockTests() {
         <>
           {autoSubmitted && (
             <div className="demo-banner auto-submit-note" role="status">
-              <span>Time is up - the test was submitted automatically.</span>
+              <span>Time is up. Your answers were submitted.</span>
             </div>
           )}
           <TestResult
             result={result}
-            subject={subject}
-            difficulty={difficulty}
+            skill={skill}
             timeTaken={formatDuration(timeTaken)}
             onRetake={handleStartTest}
             onNavigate={backToSetup}

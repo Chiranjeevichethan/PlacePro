@@ -1,61 +1,151 @@
 /**
- * PlacePro mock test service (Phase 3).
+ * PlacePro mock test service (Phase 6B, Step 2).
  *
- * IMPORTANT: This is a TEMPORARY DEMO implementation serving questions from
- * src/data/mockTestData.js. Scoring happens locally in the browser.
+ * Thin service layer over the REAL assessment endpoints exposed by
+ * src/services/api.js:
  *
- * FUTURE BACKEND INTEGRATION (do not change the exported API):
- *   - getMockQuestions() -> replace with
- *       GET /api/tests?subject=SQL&difficulty=medium
- *   - Test submission    -> replace local scoring with
- *       POST /api/tests/submit  { test_id, answers }
- *       -> { score, total, percentage, weak_topics }
+ *   startAssessment(profileId, skill, numQuestions) -> POST /api/assessment/start
+ *   submitAssessment(assessmentId, answers)         -> POST /api/assessment/{id}/submit
+ *   fetchAssessment(assessmentId)                   -> GET  /api/assessment/{id}
+ *   fetchAssessmentHistory(profileId)               -> GET  /api/profile/{id}/assessments
+ *   fetchSkillsView(profileId)                      -> GET  /api/profile/{id}/skills
  *
- * The demo path must keep the "Demo Test" labeling used by MockTests.jsx.
+ * The backend is authoritative: questions, answers, score, level, correct,
+ * total, difficulty breakdown, and topic breakdown all come from the
+ * backend response and are passed through as-is. Nothing is generated,
+ * shuffled, scored, or recomputed here, and correct answers are never
+ * exposed or invented.
  */
-import { QUESTIONS, SUBJECTS, DIFFICULTIES } from "../data/mockTestData";
 
-/** Demo timing rule: about 1 minute per question. */
+import {
+  startAssessment,
+  submitAssessment,
+  fetchAssessment,
+  fetchAssessmentHistory,
+  fetchSkillsView,
+} from "./api";
+
+/** Demo timing rule kept for the existing UI: about 1 minute per question. */
 export const SECONDS_PER_QUESTION = 60;
 
-export function getSubjects() {
-  return SUBJECTS;
-}
-
-export function getDifficulties() {
-  return DIFFICULTIES;
-}
-
-/** Normalizes a subject key for comparisons ("Computer Networks" etc.). */
-const sameText = (a, b) =>
-  String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+/* ================================================================
+   SETUP OPTIONS
+   ================================================================ */
 
 /**
- * Demo question retrieval. Shuffles deterministically per attempt so retakes
- * feel fresh, then slices to the requested count. If fewer questions exist
- * than requested, all available ones are returned (UI shows the real count).
+ * Skill options for the test setup form.
  *
- * Returns a NEW array of NEW question objects (options copied) so component
- * state can never mutate the shared demo bank.
+ * The demo subject list is gone; skill names come from the backend's
+ * profile skills view (see getProfileSkills). Provided as an empty array
+ * default so the not-yet-updated MockTests.jsx can fill this in Step 3.
  */
-export function getMockQuestions(subject, difficulty, count) {
-  const pool = QUESTIONS.filter(
-    (q) => sameText(q.subject, subject) && sameText(q.difficulty, difficulty)
-  );
-
-  // Fisher-Yates shuffle on a copy.
-  const shuffled = [...pool];
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-
-  const requested = Number(count) || pool.length;
-  return shuffled.slice(0, Math.min(requested, shuffled.length)).map((q) => ({
-    ...q,
-    options: [...q.options],
-  }));
+export function getSubjects() {
+  return [];
 }
+
+/**
+ * Difficulty options for the test setup form.
+ * Kept as a minimal constant; the backend validates the actual values.
+ */
+export function getDifficulties() {
+  return ["Easy", "Medium", "Hard"];
+}
+
+/* ================================================================
+   STARTING AN ASSESSMENT
+   ================================================================ */
+
+/**
+ * Start a REAL backend assessment.
+ *
+ * Replaces the Phase 3 demo question generation. The backend selects the
+ * questions and returns the created assessment; that response is
+ * authoritative and is returned as-is.
+ *
+ * Signature change vs the demo: (profileId, skill, count) — MockTests.jsx
+ * still needs Step 3 to pass the profile id and skill name.
+ */
+export async function getMockQuestions(profileId, skill, count) {
+  return startAssessment(profileId, skill, count);
+}
+
+/* ================================================================
+   SUBMITTING AN ASSESSMENT
+   ================================================================ */
+
+/**
+ * Build the backend answers payload from the frontend selection state.
+ *
+ * The UI stores answers as { questionId: selectedOptionIndex }. The
+ * backend expects { "<question_id>": "<answer_text>" }, so each selected
+ * option index is converted into question.options[index] BEFORE submitting:
+ *
+ *   selected option index -> question.options[selectedIndex] -> answer text
+ *
+ * Unanswered questions (missing id, non-integer index, or out-of-range
+ * index) are OMITTED — no answers are invented. Returns an object shaped
+ * { answers: { "<question_id>": answerText } } ready for submitAssessment().
+ */
+export function buildAnswerPayload(questions, answers) {
+  const payload = {};
+
+  (questions ?? []).forEach((question) => {
+    if (!question || question.question_id === undefined || question.question_id === null) {
+      return;
+    }
+
+    const selectedIndex = answers?.[question.question_id];
+    if (!Number.isInteger(selectedIndex)) {
+      return; // Unanswered: omit, never invent.
+    }
+
+    const options = Array.isArray(question.options) ? question.options : [];
+    const answerText = options[selectedIndex];
+    if (typeof answerText !== "string" || answerText.trim() === "") {
+      return; // Out-of-range or invalid option: omit rather than guess.
+    }
+
+    payload[question.question_id] = answerText;
+  });
+
+  return { answers: payload };
+}
+
+/**
+ * Submit a student's answers for grading.
+ *
+ * Converts frontend option indexes into answer text (see
+ * buildAnswerPayload), then delegates grading entirely to the backend via
+ * submitAssessment(). No score, level, or breakdown is computed here —
+ * the backend response is returned as-is.
+ */
+export async function submitMockTest(assessmentId, questions, answers, profileId) {
+  const answerPayload = buildAnswerPayload(questions, answers);
+  return submitAssessment(assessmentId, profileId, answerPayload.answers);
+}
+
+/* ================================================================
+   READ WRAPPERS
+   ================================================================ */
+
+/** Fetch a previously started assessment (questions + state). */
+export async function getAssessment(assessmentId) {
+  return fetchAssessment(assessmentId);
+}
+
+/** Fetch a profile's past assessment attempts. */
+export async function getAssessmentHistory(profileId) {
+  return fetchAssessmentHistory(profileId);
+}
+
+/** Fetch a profile's per-skill proficiency view. */
+export async function getProfileSkills(profileId) {
+  return fetchSkillsView(profileId);
+}
+
+/* ================================================================
+   PURE FORMATTING HELPERS (unchanged from Phase 3)
+   ================================================================ */
 
 /** Formats seconds as "M:SS". */
 export function formatTime(totalSeconds) {
@@ -72,65 +162,4 @@ export function formatDuration(totalSeconds) {
   const seconds = safe % 60;
   if (minutes === 0) return `${seconds}s`;
   return `${minutes}m ${seconds}s`;
-}
-
-/**
- * Local demo scoring. Produces the same shape the future
- * POST /api/tests/submit response is expected to have.
- */
-export function scoreTest(questions, answers) {
-  const perQuestion = questions.map((question) => {
-    const selectedIndex = answers[question.id];
-    const answered = Number.isInteger(selectedIndex);
-    const correct = answered && selectedIndex === question.correctAnswer;
-
-    return {
-      question,
-      selectedIndex: answered ? selectedIndex : null,
-      status: !answered ? "unanswered" : correct ? "correct" : "wrong",
-    };
-  });
-
-  const correctCount = perQuestion.filter((r) => r.status === "correct").length;
-  const wrongCount = perQuestion.filter((r) => r.status === "wrong").length;
-  const unansweredCount = perQuestion.filter(
-    (r) => r.status === "unanswered"
-  ).length;
-  const total = questions.length;
-  const percentage = total ? Math.round((correctCount / total) * 100) : 0;
-
-  // Topic-wise demo performance: { topic: { correct, total } }.
-  const topicMap = new Map();
-  perQuestion.forEach(({ question, status }) => {
-    const entry = topicMap.get(question.topic) || { correct: 0, total: 0 };
-    entry.total += 1;
-    if (status === "correct") entry.correct += 1;
-    topicMap.set(question.topic, entry);
-  });
-
-  const topicPerformance = [...topicMap.entries()]
-    .map(([topic, { correct, total: topicTotal }]) => ({
-      topic,
-      correct,
-      total: topicTotal,
-      percentage: Math.round((correct / topicTotal) * 100),
-    }))
-    .sort((a, b) => a.percentage - b.percentage);
-
-  // Weak areas: any topic below 60% correct in this attempt.
-  const weakTopics = topicPerformance
-    .filter((t) => t.percentage < 60)
-    .map((t) => t.topic);
-
-  return {
-    perQuestion,
-    score: correctCount,
-    wrong: wrongCount,
-    unanswered: unansweredCount,
-    total,
-    percentage,
-    topicPerformance,
-    weakTopics,
-    demo: true,
-  };
 }

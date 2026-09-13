@@ -10,6 +10,11 @@
  * The backend is likewise authoritative there: statuses, requirement
  * buckets, counts, and reasons are displayed as returned — the frontend
  * never recomputes eligibility.
+ *
+ * Phase 6B adds the Mock Test assessment endpoints (start/submit/fetch
+ * assessment, assessment history, and the profile skills view). The
+ * backend is again authoritative: questions, scoring, and statuses are
+ * returned as-is — nothing is mocked or recomputed here.
  */
 
 const API_BASE_URL =
@@ -813,4 +818,309 @@ export async function predictPlacement(formData) {
   const data = await requestPrediction(payload);
 
   return normalizePredictionResponse(data);
+}
+
+/* ================================================================
+   MOCK TEST ASSESSMENT (Phase 6B)
+   ================================================================ */
+
+/**
+ * Start a new mock-test assessment.
+ *
+ * POST /api/assessment/start with { profile_id, skill, num_questions }.
+ * The backend selects the questions and returns the created assessment;
+ * that response is authoritative and is returned as-is — no questions,
+ * answers, or scores are invented here.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function startAssessment(profileId, skill, numQuestions) {
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/assessment/start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        profile_id: profileId,
+        skill: skill,
+        num_questions: numQuestions,
+      }),
+    });
+  } catch {
+    throw new Error(
+      "Cannot reach the assessment service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 422) {
+      let detail = null;
+
+      try {
+        const body = await response.json();
+        detail = body?.detail ?? null;
+      } catch {
+        // Body could not be parsed; fall back to the generic message below.
+      }
+
+      throw new Error(formatValidationError(detail));
+    }
+
+    if (response.status === 404) {
+      throw new Error(
+        "Could not start the assessment: the profile or skill was not found."
+      );
+    }
+
+    if (response.status === 429) {
+      // Cooldown/attempt-limit: surface the backend's own detail message
+      // (e.g. "Please wait before retrying Python. Next attempt allowed
+      // after ...") instead of a generic retry error. No local cooldown
+      // calculation — the backend is authoritative.
+      let rateDetail = null;
+
+      try {
+        const body = await response.json();
+        rateDetail = body?.detail ?? null;
+      } catch {
+        // Body could not be parsed; fall back to the generic message below.
+      }
+
+      throw new Error(
+        typeof rateDetail === "string" && rateDetail.trim() !== ""
+          ? rateDetail
+          : "Unable to start the assessment. Please try again."
+      );
+    }
+
+    throw new Error("Unable to start the assessment. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to start the assessment. Please try again.");
+  }
+
+  /* Malformed 200: require a JSON object instead of substituting an
+     invented assessment; deeper shape checks belong to the consumer. */
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      "The assessment service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Submit a student's answers for an assessment.
+ *
+ * POST /api/assessment/{assessmentId}/submit with { profile_id, answers }.
+ * The backend grades the submission and returns the result; that response
+ * is authoritative and is returned as-is — nothing is scored here.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function submitAssessment(assessmentId, profileId, answers) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/assessment/${encodeURIComponent(
+        assessmentId
+      )}/submit`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          profile_id: profileId,
+          answers: answers,
+        }),
+      }
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the assessment service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 422) {
+      let detail = null;
+
+      try {
+        const body = await response.json();
+        detail = body?.detail ?? null;
+      } catch {
+        // Body could not be parsed; fall back to the generic message below.
+      }
+
+      throw new Error(formatValidationError(detail));
+    }
+
+    if (response.status === 404) {
+      throw new Error("Assessment was not found.");
+    }
+
+    throw new Error("Unable to submit the assessment. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to submit the assessment. Please try again.");
+  }
+
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      "The assessment service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Fetch a previously started assessment (questions + current state).
+ *
+ * GET /api/assessment/{assessmentId}
+ * The response is authoritative and is returned as-is.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchAssessment(assessmentId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/assessment/${encodeURIComponent(assessmentId)}`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the assessment service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Assessment was not found.");
+    }
+
+    throw new Error("Unable to load the assessment. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to load the assessment. Please try again.");
+  }
+
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      "The assessment service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Fetch a profile's past assessment attempts.
+ *
+ * GET /api/profile/{profileId}/assessments
+ * The history returned by the backend is authoritative and is returned
+ * as-is — nothing is filtered or recomputed here.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchAssessmentHistory(profileId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/assessments`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the assessment history service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Assessment history was not found.");
+    }
+
+    throw new Error("Unable to load assessment history. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to load assessment history. Please try again.");
+  }
+
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      "The assessment history service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Fetch a profile's skill view (per-skill proficiency as tracked by the
+ * backend and updated by assessments).
+ *
+ * GET /api/profile/{profileId}/skills
+ * The response is authoritative and is returned as-is.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchSkillsView(profileId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/skills`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the skills service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Skill view data was not found.");
+    }
+
+    throw new Error("Unable to load the skills view. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to load the skills view. Please try again.");
+  }
+
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      "The skills service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
 }
