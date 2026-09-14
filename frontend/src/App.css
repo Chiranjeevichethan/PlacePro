@@ -6474,3 +6474,67 @@ body {
     width: 100%;
   }
 }
+
+/* ================================
+   DASHBOARD REAL-DATA STATES
+   ================================ */
+
+.dashboard-empty-state {
+  padding: 18px 4px;
+}
+
+.dashboard-gap-list,
+.dashboard-assessment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-gap-list li {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.dashboard-gap-list li p {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.dashboard-priority-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.dashboard-assessment-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.dashboard-assessment-list li strong {
+  color: var(--text);
+}
+
+.dashboard-assessment-list li .skills-empty {
+  margin-left: auto;
+}

@@ -1,11 +1,17 @@
 import IconMark from "./IconMark";
 
-function StatsCard({ title, value, description, icon, accent = "blue" }) {
+/**
+ * StatsCard - dashboard statistic tile.
+ *
+ * `chip` is an optional badge (e.g. "REAL DATA"); when omitted no badge is
+ * rendered — never a fake "DEMO" marker on real backend values.
+ */
+function StatsCard({ title, value, description, icon, accent = "blue", chip = null }) {
   return (
     <div className="stats-card">
       <div className="stats-card-top">
         <IconMark name={icon} className={`stats-card-icon ${accent}`} />
-        <span className="demo-chip">DEMO</span>
+        {chip && <span className="demo-chip">{chip}</span>}
       </div>
 
       <div className="stats-card-title">{title}</div>

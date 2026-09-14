@@ -291,6 +291,176 @@ export async function fetchCompanyRecommendations(profileId, limit) {
   return data;
 }
 
+/**
+ * Fetch the combined placement prediction + readiness summary for a profile.
+ *
+ * GET /api/profile/{profileId}/placement-summary ->
+ *   {
+ *     ready_for_prediction: boolean,
+ *     placement_probability: number (0-1) | null,   // null before first run
+ *     prediction: "PLACED" | "NOT PLACED" | null,
+ *     confidence: number (0-1) | null,
+ *     model_version: string | null,
+ *     missing_fields: string[],
+ *     reason: string | null,
+ *     readiness: { ...full Phase 12 readiness response }
+ *   }
+ *
+ * The backend is authoritative: probability/confidence/prediction are
+ * returned as-is and may legitimately be null before the first prediction
+ * — callers must render an honest empty state, never 0%.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchPlacementSummary(profileId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(
+        profileId
+      )}/placement-summary`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the placement summary service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Placement summary was not found.");
+    }
+
+    if (response.status === 422) {
+      let detail = null;
+
+      try {
+        const body = await response.json();
+        detail = body?.detail ?? null;
+      } catch {
+        // Body could not be parsed; fall back to the generic message below.
+      }
+
+      throw new Error(
+        typeof detail === "string" && detail.trim() !== ""
+          ? detail
+          : "Profile must be verified before a placement summary can be generated."
+      );
+    }
+
+    throw new Error("Unable to load the placement summary. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      "The placement summary service returned an unexpected response. Please try again."
+    );
+  }
+
+  /* Malformed 200: require an object; the nullable fields are validated
+     defensively by the caller (null is a valid "no prediction yet" state). */
+  if (!data || typeof data !== "object") {
+    throw new Error(
+      "The placement summary service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
+/**
+ * Fetch consolidated performance analytics for a profile.
+ *
+ * GET /api/profile/{profileId}/performance ->
+ *   {
+ *     profile_id,
+ *     verified: boolean,
+ *     summary: {
+ *       predictions_count, latest_prediction, latest_probability,
+ *       latest_timestamp, highest_probability, lowest_probability,
+ *       assessments_count, skills_assessed, average_score,
+ *       latest_skill, latest_score, latest_level, latest_timestamp
+ *     },
+ *     prediction_history: [{ prediction, placement_probability, timestamp, ... }],
+ *     assessment_history: [{ skill, score, level, attempt, verified,
+ *                            assessment_id, timestamp }],
+ *     readiness: { ...full readiness response },
+ *     skills: [{ skill, resume_detected, user_entered,
+ *                assessment_score, assessment_verified, level }]
+ *   }
+ *
+ * The backend is authoritative: counts, scores, and histories are returned
+ * as-is — empty histories mean count 0 / nulls, never substituted values.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function fetchPerformance(profileId) {
+  let response;
+
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/performance`
+    );
+  } catch {
+    throw new Error(
+      "Cannot reach the performance service. Please make sure the FastAPI backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("Student performance data was not found.");
+    }
+
+    if (response.status === 422) {
+      let detail = null;
+
+      try {
+        const body = await response.json();
+        detail = body?.detail ?? null;
+      } catch {
+        // Body could not be parsed; fall back to the generic message below.
+      }
+
+      throw new Error(
+        typeof detail === "string" && detail.trim() !== ""
+          ? detail
+          : "Profile must be verified before performance analytics can be generated."
+      );
+    }
+
+    throw new Error("Unable to load performance data. Please try again.");
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      "The performance service returned an unexpected response. Please try again."
+    );
+  }
+
+  /* Malformed 200: validate the top-level structure instead of
+     substituting empty summaries. */
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !data.summary ||
+    typeof data.summary !== "object"
+  ) {
+    throw new Error(
+      "The performance service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
 /** Readable labels for backend validation fields (HTTP 422 messages). */
 const FIELD_LABELS = {
   branch: "Branch",
