@@ -7,7 +7,6 @@ import Dashboard from "./pages/Dashboard";
 import Prediction from "./pages/Prediction";
 import SalaryPrediction from "./pages/SalaryPrediction";
 import CompanyRecommendations from "./pages/CompanyRecommendations";
-import CompanyEligibility from "./pages/CompanyEligibility";
 import SkillGapAnalysis from "./pages/SkillGapAnalysis";
 import MockTests from "./pages/MockTests";
 import StudentProfile from "./pages/StudentProfile";
@@ -72,10 +71,6 @@ function App() {
 
           {currentPage === "salary" && (
             <SalaryPrediction />
-          )}
-
-          {currentPage === "eligibility" && (
-            <CompanyEligibility />
           )}
 
           {currentPage === "companies" && (
