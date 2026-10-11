@@ -1,20 +1,37 @@
 import IconMark from "../components/IconMark";
 import EditProfileModal from "../components/EditProfileModal";
+import ResumeUploadModal from "../components/ResumeUploadModal";
 import { useStudentProfile } from "../hooks/useProfile";
 
 function StudentProfile({
   editOpen = false,
   onRequestEdit,
   onCloseEdit,
+  resumeOpen = false,
+  onRequestResume,
+  onCloseResume,
 }) {
   const {
+    profileId,
     profile,
     rawProfile,
     loading,
     error,
     refetch,
     applyUpdatedProfile,
+    resumeDraft,
+    setPendingResumeDraft,
+    clearPendingResumeDraft,
   } = useStudentProfile();
+
+  /* Refetch the authoritative profile after a successful verify so the
+     "Verified" badge reflects the backend's stored state. */
+  const handleResumeVerified = (data) => {
+    const verifiedProfileId = data?.profile?.profile_id;
+    clearPendingResumeDraft();
+    onCloseResume?.();
+    refetch(verifiedProfileId);
+  };
 
   const academicData = profile
     ? [
@@ -144,13 +161,23 @@ function StudentProfile({
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="dash-btn secondary profile-edit-btn"
-                onClick={onRequestEdit}
-              >
-                Edit Profile
-              </button>
+              <div className="profile-card-actions">
+                <button
+                  type="button"
+                  className="dash-btn secondary"
+                  onClick={onRequestResume}
+                >
+                  Update from Resume
+                </button>
+
+                <button
+                  type="button"
+                  className="dash-btn secondary profile-edit-btn"
+                  onClick={onRequestEdit}
+                >
+                  Edit Profile
+                </button>
+              </div>
             </div>
           </div>
 
@@ -259,10 +286,20 @@ function StudentProfile({
 
       {editOpen && profile && rawProfile && (
         <EditProfileModal
+          profileId={profileId}
           profile={profile}
           backendProfile={rawProfile}
           onSaved={applyUpdatedProfile}
           onClose={onCloseEdit}
+        />
+      )}
+
+      {resumeOpen && (
+        <ResumeUploadModal
+          resumeDraft={resumeDraft}
+          onDraftCreated={(result) => setPendingResumeDraft(result.draftProfile)}
+          onVerified={handleResumeVerified}
+          onClose={onCloseResume}
         />
       )}
     </div>

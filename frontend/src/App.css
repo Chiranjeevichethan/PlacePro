@@ -3700,6 +3700,42 @@ body {
   margin-top: 24px;
 }
 
+/* ---- Resume upload / draft review modal ---- */
+
+.resume-section-heading {
+  margin: 22px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+}
+
+.resume-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #64748b;
+  margin: 6px 0 14px;
+}
+
+.resume-file-selected {
+  display: block;
+  margin-top: 6px;
+}
+
+.resume-info-banner {
+  background: var(--success-bg, #ecfdf5);
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  margin-bottom: 16px;
+}
+
+.profile-card-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @keyframes modalFadeIn {
   from {
     opacity: 0;

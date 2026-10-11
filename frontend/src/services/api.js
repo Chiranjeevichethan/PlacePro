@@ -802,6 +802,333 @@ export async function requestSalaryPrediction(payload) {
   };
 }
 
+/* ================================================================
+   RESUME → DRAFT PROFILE → VERIFY (Phase 16/18)
+   ================================================================ */
+
+const DRAFT_NULLABLE_TEXT_FIELDS = [
+  ["personal", "name"],
+  ["personal", "email"],
+  ["personal", "phone"],
+  ["personal", "location"],
+  ["personal", "linkedin"],
+  ["personal", "github"],
+  ["personal", "portfolio"],
+  ["education", "degree"],
+  ["education", "branch"],
+  ["education", "college"],
+];
+
+/**
+ * Validate the DRAFT StudentProfile returned by POST /api/profile/from-resume.
+ *
+ * Rejects a response whose shape is not the documented Phase 16 contract
+ * (ProfileFromResumeResponse). Every declared field is normalized to exactly
+ * null when absent or non-conforming — nothing is invented or defaulted:
+ * the "ML prediction inputs" stay null so the honest "Not set" state can be
+ * shown until the student provides real values.
+ */
+function validateDraftFromResumeResponse(data) {
+  if (!data || typeof data !== "object" || !data.profile || typeof data.profile !== "object") {
+    throw new Error(
+      "The resume service returned an unexpected response. Please try again."
+    );
+  }
+
+  if (typeof data.completion !== "object" || data.completion === null) {
+    throw new Error(
+      "The resume service returned an unexpected response. Please try again."
+    );
+  }
+
+  if (typeof data.message !== "string") {
+    throw new Error(
+      "The resume service returned an unexpected response. Please try again."
+    );
+  }
+
+  const draft = data.profile;
+  /* Start from a verbatim copy of the backend draft so server-controlled
+     fields (profile_id, provenance, original_resume_values, ...) are
+     preserved exactly as returned — the verify body must be the FULL
+     profile as the backend created it. */
+  const normalized = JSON.parse(JSON.stringify(draft));
+  normalized.verified = false;
+
+  /* Textual declared fields: normalized to exact null when absent or
+     non-conforming — nothing is invented or defaulted. */
+  const text = (sections, field) => {
+    const value = draft?.[sections]?.[field];
+    if (typeof value === "string") {
+      normalized[sections][field] = value;
+    } else if (value !== null && value !== undefined && value !== "") {
+      // Wrong type (e.g. number where a string is expected): keep the value
+      // visible in the review but normalized, never silently dropped.
+      normalized[sections][field] = String(value);
+    } else {
+      // Exact null (or empty string) — kept as null: displayed as "Not set"
+      // and blocking verification until the student enters it.
+      normalized[sections][field] = null;
+    }
+  };
+
+  if (draft.personal && typeof draft.personal === "object") {
+    DRAFT_NULLABLE_TEXT_FIELDS.filter(([s]) => s === "personal").forEach(
+      ([section, field]) => text(section, field)
+    );
+  }
+
+  if (draft.education && typeof draft.education === "object") {
+    DRAFT_NULLABLE_TEXT_FIELDS.filter(([s]) => s === "education").forEach(
+      ([section, field]) => text(section, field)
+    );
+    const cgpa = draft.education.cgpa;
+    normalized.education.cgpa = typeof cgpa === "number" ? cgpa : null;
+    const graduationYear = draft.education.graduation_year;
+    if (graduationYear === null || graduationYear === undefined) {
+      normalized.education.graduation_year = null;
+    } else if (Number.isInteger(graduationYear)) {
+      normalized.education.graduation_year = graduationYear;
+    } else {
+      const parsed = Number(graduationYear);
+      normalized.education.graduation_year = Number.isInteger(parsed) ? parsed : null;
+    }
+  }
+
+  /* Structural arrays: kept as-is when they are proper arrays of objects
+     (backend-extracted evidence). Anything else is normalized to an empty
+     array so the review UI shows an honest "None found" instead of crashing. */
+  const isEntryArray = (v) =>
+    Array.isArray(v) && v.every((e) => e === null || typeof e === "object");
+  normalized.experience = isEntryArray(draft.experience) ? draft.experience : [];
+  normalized.internships = isEntryArray(draft.internships) ? draft.internships : [];
+  normalized.projects = isEntryArray(draft.projects) ? draft.projects : [];
+  normalized.certifications = isEntryArray(draft.certifications)
+    ? draft.certifications
+    : [];
+
+  if (draft.skills && typeof draft.skills === "object") {
+    normalized.skills = {};
+    for (const [key, value] of Object.entries(draft.skills)) {
+      normalized.skills[key] = Array.isArray(value) ? value : [];
+    }
+  }
+
+  if (draft.achievements && typeof draft.achievements === "object") {
+    normalized.achievements = {};
+    for (const [key, value] of Object.entries(draft.achievements)) {
+      normalized.achievements[key] = Array.isArray(value) ? value : [];
+    }
+  }
+
+  /* IMPORTANT: the 10 ML prediction inputs MUST remain missing until the
+     student explicitly provides them. They are never inferred from resume
+     content; any non-conforming backend value here becomes exact null. */
+  if (draft.ml_inputs && typeof draft.ml_inputs === "object") {
+    normalized.ml_inputs = {};
+    for (const field of [
+      "college_tier",
+      "backlogs",
+      "coding_skills",
+      "dsa_score",
+      "aptitude_score",
+      "communication_skills",
+      "ml_knowledge",
+      "system_design",
+      "open_source_contributions",
+      "extracurriculars",
+    ]) {
+      const value = draft.ml_inputs[field];
+      normalized.ml_inputs[field] = value === null || value === undefined ? null : value;
+    }
+  }
+
+  if (draft.additional_info && typeof draft.additional_info === "object") {
+    normalized.additional_info = {};
+    for (const [key, value] of Object.entries(draft.additional_info)) {
+      normalized.additional_info[key] = value === undefined ? null : value;
+    }
+  }
+
+  return {
+    draftProfile: normalized,
+    completion: data.completion,
+    message: data.message,
+    provenance: Array.isArray(data.provenance) ? data.provenance : [],
+    confidence:
+      data.confidence && typeof data.confidence === "object" ? data.confidence : {},
+    feature_availability: Array.isArray(data.feature_availability)
+      ? data.feature_availability
+      : [],
+  };
+}
+
+/**
+ * Upload a resume and have the backend create a DRAFT profile for review.
+ *
+ * POST /api/profile/from-resume (multipart/form-data, field "file") ->
+ * ProfileFromResumeResponse, i.e.
+ *   {
+ *     profile: StudentProfile,       // draft (verified: false)
+ *     completion: { profile_complete, missing_fields, ... },
+ *     message: string,
+ *     provenance: [...],             // optional additive fields
+ *     confidence: {...},
+ *     diagnostics: {...},
+ *     extraction_summary: {...},
+ *     feature_availability: [...]
+ *   }
+ *
+ * The response is validated against the documented contract and returned
+ * as-is (after normalization of declared fields to exact null). Nothing is
+ * invented here — especially the 10 ML prediction inputs, which stay
+ * missing until the student explicitly provides them.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function createProfileFromResume(file) {
+  const formData = new FormData();
+  formData.append("file", file); // field name matches the backend schema
+
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/profile/from-resume`, {
+      method: "POST",
+      body: formData, // fetch sets multipart boundary; no manual Content-Type
+    });
+  } catch {
+    throw new Error(
+      "Cannot reach the resume service. Please make sure the backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    let detail = null;
+
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? null;
+    } catch {
+      // Body could not be parsed; fall back to generic messages below.
+    }
+
+    if (response.status === 422) {
+      throw new Error(
+        typeof detail === "string" && detail.trim() !== ""
+          ? detail
+          : "The uploaded resume was rejected. Please check the file and try again."
+      );
+    }
+
+    if (response.status === 413) {
+      throw new Error(
+        "The resume file is too large. Please upload a smaller file."
+      );
+    }
+
+    throw new Error(
+      `Resume upload failed (HTTP ${response.status}). Please try again.`
+    );
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      "The resume service returned an unexpected response. Please try again."
+    );
+  }
+
+  return validateDraftFromResumeResponse(data);
+}
+
+/**
+ * Explicitly confirm the reviewed profile.
+ *
+ * POST /api/profile/verify with the FULL edited StudentProfile as the JSON
+ * body. On success the backend stores the profile with verified: true and
+ * returns { profile, completion, message } (ProfileResponse).
+ *
+ * The full profile body (including any null ml_inputs fields) is REQUIRED
+ * by the contract, so the caller must pass the exact draft/profile object
+ * that was reviewed. No new values are invented here.
+ * Throws an Error with a user-readable message on any failure.
+ */
+export async function verifyStudentProfile(profileBody) {
+  if (!profileBody || typeof profileBody !== "object") {
+    throw new Error(
+      "The reviewed profile is missing. Please upload your resume again before verifying."
+    );
+  }
+
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/profile/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(profileBody),
+    });
+  } catch {
+    throw new Error(
+      "Cannot reach the profile service. Please make sure the backend is running."
+    );
+  }
+
+  if (!response.ok) {
+    let detail = null;
+
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? null;
+    } catch {
+      // Body could not be parsed; fall back to generic messages below.
+    }
+
+    if (response.status === 422) {
+      throw new Error(
+        typeof detail === "string" && detail.trim() !== ""
+          ? detail
+          : "The profile could not be verified. Please check the details and try again."
+      );
+    }
+
+    if (response.status === 404) {
+      throw new Error(
+        typeof detail === "string" && detail.trim() !== ""
+          ? detail
+          : "Student profile was not found."
+      );
+    }
+
+    throw new Error(
+      `Profile verification failed (HTTP ${response.status}). Please try again.`
+    );
+  }
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      "The profile service returned an unexpected response. Please try again."
+    );
+  }
+
+  if (!data?.profile || typeof data.completion !== "object") {
+    throw new Error(
+      "The profile service returned an unexpected response. Please try again."
+    );
+  }
+
+  return data;
+}
+
 /**
  * Request a placement prediction from the production backend.
  * Throws an Error with a user-readable message on any failure.

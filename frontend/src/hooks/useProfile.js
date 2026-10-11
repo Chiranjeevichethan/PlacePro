@@ -20,6 +20,8 @@ import { fetchStudentProfile } from "../services/api";
 import { DEMO_PROFILE_ID, flattenBackendProfile } from "../services/profileConfig";
 
 const PROFILE_KEY = "placepro_profile";
+const PROFILE_ID_KEY = "placepro_profile_id";
+const RESUME_DRAFT_KEY = "placepro_resume_draft";
 
 const DEFAULT_PROFILE = {
   name: "Bhargav",
@@ -36,6 +38,35 @@ const DEFAULT_PROFILE = {
   preferredRole: "",
 };
 
+/**
+ * Persist / restore the pending resume draft between verify steps.
+ * The draft is a verbatim backend DraftStudentProfile — it may contain
+ * exact null fields (the 10 ML prediction inputs MUST stay missing until
+ * the student explicitly provides them).
+ */
+function loadResumeDraft() {
+  try {
+    const raw = localStorage.getItem(RESUME_DRAFT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch {
+    // Ignore malformed storage and treat as "no pending draft".
+  }
+  return null;
+}
+
+function saveResumeDraft(draft) {
+  try {
+    localStorage.setItem(RESUME_DRAFT_KEY, JSON.stringify(draft));
+    return true;
+  } catch {
+    // Storage may be unavailable; the app still works within one session.
+    return false;
+  }
+}
+
 function loadMirror() {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
@@ -48,21 +79,44 @@ function loadMirror() {
   return DEFAULT_PROFILE;
 }
 
+const normalizeProfileId = (value) =>
+  typeof value === "string" && value.trim() !== ""
+    ? value.trim()
+    : DEMO_PROFILE_ID;
+
+function loadProfileId() {
+  try {
+    return normalizeProfileId(localStorage.getItem(PROFILE_ID_KEY));
+  } catch {
+    return DEMO_PROFILE_ID;
+  }
+}
+
+function saveProfileId(profileId) {
+  try {
+    localStorage.setItem(PROFILE_ID_KEY, normalizeProfileId(profileId));
+  } catch {
+    // Storage may be unavailable; in-memory state still selects the profile.
+  }
+}
+
 /**
  * Loads the student profile from the real backend.
  * The backend is authoritative: no demo values are ever substituted here.
  */
 export function useStudentProfile() {
+  const [profileId, setProfileId] = useState(loadProfileId);
   const [status, setStatus] = useState("loading");
   const [profile, setProfile] = useState(null);
   const [rawProfile, setRawProfile] = useState(null);
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
+  const [resumeDraft, setResumeDraft] = useState(loadResumeDraft);
 
   useEffect(() => {
     let active = true;
 
-    fetchStudentProfile(DEMO_PROFILE_ID)
+    fetchStudentProfile(profileId)
       .then((data) => {
         if (!active) return;
 
@@ -74,6 +128,7 @@ export function useStudentProfile() {
         // Mirror for useProfile() consumers (demo pages) and the navbar.
         try {
           localStorage.setItem(PROFILE_KEY, JSON.stringify(display));
+          saveProfileId(data.profile?.profile_id ?? profileId);
           window.dispatchEvent(new Event("placepro-profile-updated"));
         } catch {
           // Storage may be unavailable; the page still shows backend data.
@@ -94,14 +149,22 @@ export function useStudentProfile() {
     return () => {
       active = false;
     };
-  }, [attempt]);
+  }, [attempt, profileId]);
 
-  const refetch = useCallback(() => {
+  const refetch = useCallback((nextProfileId) => {
+    const requestedProfileId = normalizeProfileId(nextProfileId ?? profileId);
+
+    if (requestedProfileId !== profileId) {
+      saveProfileId(requestedProfileId);
+      setProfileId(requestedProfileId);
+    } else {
+      setAttempt((n) => n + 1);
+    }
+
     // Event-handler state updates (not effect-body): restart the load.
-    setAttempt((n) => n + 1);
     setStatus("loading");
     setError(null);
-  }, []);
+  }, [profileId]);
 
   /**
    * Applies a successful PUT response (the updated backend profile) without
@@ -116,19 +179,48 @@ export function useStudentProfile() {
 
     try {
       localStorage.setItem(PROFILE_KEY, JSON.stringify(display));
+      saveProfileId(data.profile?.profile_id ?? profileId);
       window.dispatchEvent(new Event("placepro-profile-updated"));
     } catch {
       // Storage may be unavailable; the page still shows backend data.
     }
+  }, [profileId]);
+
+  /**
+   * Stores the verbatim draft profile created from a resume
+   * (POST /api/profile/from-resume response payload). No field is
+   * inferred or filled in here — nulls stay null.
+   */
+  const setPendingResumeDraft = useCallback((draftProfile) => {
+    if (!draftProfile || typeof draftProfile !== "object") return;
+    setResumeDraft(draftProfile);
+    saveResumeDraft(draftProfile);
+  }, []);
+
+  /**
+   * Clears the pending draft after a successful verify (or explicit
+   * discard by the student).
+   */
+  const clearPendingResumeDraft = useCallback(() => {
+    setResumeDraft(null);
+    try {
+      localStorage.removeItem(RESUME_DRAFT_KEY);
+    } catch {
+      // Storage may be unavailable; in-memory state is already cleared.
+    }
   }, []);
 
   return {
+    profileId,
     profile,
     rawProfile,
     loading: status === "loading",
     error,
     refetch,
     applyUpdatedProfile,
+    resumeDraft,
+    setPendingResumeDraft,
+    clearPendingResumeDraft,
   };
 }
 

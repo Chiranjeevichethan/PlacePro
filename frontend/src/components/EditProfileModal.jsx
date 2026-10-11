@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { updateStudentProfile } from "../services/api";
 import {
   BRANCH_OPTIONS,
-  DEMO_PROFILE_ID,
   EDIT_RANGES,
   TIER_OPTIONS,
   buildEditState,
@@ -107,7 +106,13 @@ const FIELDS = [
 const REQUIRED_TEXT = ["name"];
 const REQUIRED_SELECTS = ["branch", "collegeTier"];
 
-function EditProfileModal({ profile, backendProfile, onSaved, onClose = () => {} }) {
+function EditProfileModal({
+  profileId,
+  profile,
+  backendProfile,
+  onSaved,
+  onClose = () => {},
+}) {
   const [form, setForm] = useState(() => buildEditState(profile));
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
@@ -187,7 +192,8 @@ function EditProfileModal({ profile, backendProfile, onSaved, onClose = () => {}
 
     try {
       const payload = buildProfilePayload(backendProfile, form);
-      const data = await updateStudentProfile(DEMO_PROFILE_ID, payload);
+      const targetProfileId = profileId || backendProfile?.profile_id;
+      const data = await updateStudentProfile(targetProfileId, payload);
       onSaved?.(data);
       onClose();
     } catch (err) {

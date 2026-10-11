@@ -124,6 +124,8 @@ export function flattenBackendProfile(backendProfile) {
   const tier = asText(ml.college_tier);
 
   return {
+    profileId: asText(p.profile_id),
+
     /* identity */
     name: asText(personal.name),
     email: asText(personal.email),

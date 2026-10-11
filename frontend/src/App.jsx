@@ -21,6 +21,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState("dashboard");
   const [authenticated, setAuthenticated] = useState(() => isAuthenticated());
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [resumeProfileOpen, setResumeProfileOpen] = useState(false);
 
   if (!authenticated) {
     return (
@@ -32,6 +33,16 @@ function App() {
       />
     );
   }
+
+  /* Sidebar navigation: leave the profile page -> close both modals so a
+     stale open state can't re-open them when the page is revisited. */
+  const handleNavigate = (page) => {
+    if (page !== "profile") {
+      setEditProfileOpen(false);
+      setResumeProfileOpen(false);
+    }
+    setCurrentPage(page);
+  };
 
   const handleEditProfile = () => {
     setCurrentPage("profile");
@@ -47,7 +58,7 @@ function App() {
     <div className="app">
       {/* Top navigation */}
       <Navbar
-        setCurrentPage={setCurrentPage}
+        setCurrentPage={handleNavigate}
         onEditProfile={handleEditProfile}
         onLogout={handleLogout}
       />
@@ -56,7 +67,7 @@ function App() {
         {/* Left sidebar */}
         <Sidebar
           currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
+          setCurrentPage={handleNavigate}
         />
 
         {/* Main page content */}
@@ -90,6 +101,9 @@ function App() {
               editOpen={editProfileOpen}
               onRequestEdit={() => setEditProfileOpen(true)}
               onCloseEdit={() => setEditProfileOpen(false)}
+              resumeOpen={resumeProfileOpen}
+              onRequestResume={() => setResumeProfileOpen(true)}
+              onCloseResume={() => setResumeProfileOpen(false)}
             />
           )}
 
