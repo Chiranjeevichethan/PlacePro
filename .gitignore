@@ -1,0 +1,42 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python environments
+.venv/
+venv/
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment secrets
+.env
+.env.*
+
+# Allow an example environment file
+!.env.example
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime-generated application data
+/data/profiles/
+/data/assessments/
+*.tmp
+
+# Local datasets
+/salary_model/placement.csv
+
+# Generated analysis and experiment files
+/analysis/
+/outputs/
+/scratch/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
