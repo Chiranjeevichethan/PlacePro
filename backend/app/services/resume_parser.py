@@ -133,9 +133,11 @@ SECTION_HEADINGS = {
     ],
     "experience": [
         "work experience", "professional experience", "employment history",
-        "work history", "experience",
+        "work history", "industry experience", "experience",
     ],
-    "internships": ["internships", "internship", "intern"],
+    "internships": [
+        "internship experience", "internships", "internship", "intern",
+    ],
     "projects": [
         "academic projects", "personal projects", "project experience",
         "projects",
@@ -145,6 +147,17 @@ SECTION_HEADINGS = {
         "achievements", "awards", "honors", "honours", "accomplishments",
         "achievement",
     ],
+    "hackathons": ["hackathons and achievements", "hackathons", "hackathon"],
+    "open_source": [
+        "open source", "open-source", "open source contributions",
+        "open-source contributions",
+    ],
+    "extracurriculars": [
+        "extracurricular activities", "extra curricular activities",
+        "extracurriculars", "extra curriculars", "activities",
+    ],
+    # Non-extracted sections still delimit the preceding section.
+    "references": ["references", "referees"],
 }
 
 
@@ -206,10 +219,22 @@ URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?([a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)+)(?:/[^\s)]*)?"
 )
 
+MONTH_RE_PART = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|"
+    r"Nov(?:ember)?|Dec(?:ember)?)"
+)
+
 YEAR_RE = re.compile(r"\b20\d{2}\b")
 
 DATE_RANGE_RE = re.compile(
     r"\b(20\d{2})\s*(?:[-–—~]|to)\s*(20\d{2}|present|current|now|till\s*date)?\b",
+    re.IGNORECASE,
+)
+
+MONTH_DATE_RANGE_RE = re.compile(
+    rf"\b(?:{MONTH_RE_PART}\s+)?20\d{{2}}\s*(?:[-–—~]|to)\s*"
+    rf"(?:(?:{MONTH_RE_PART}\s+)?20\d{{2}}|present|current|now|till\s*date)\b",
     re.IGNORECASE,
 )
 
@@ -446,6 +471,18 @@ def _url_host(url: str) -> str:
     return m.group(1).lower() if m else ""
 
 
+def _is_plausible_url(url: str) -> bool:
+    host = _url_host(url)
+    if not host:
+        return False
+    labels = host.split(".")
+    if len(labels[-1]) < 2:
+        return False
+    if all(len(label) == 1 for label in labels):
+        return False
+    return True
+
+
 def extract_links(text: str):
     """Return (linkedin, github, portfolio) - each None when not found."""
     linkedin = github = portfolio = None
@@ -456,6 +493,8 @@ def extract_links(text: str):
         if before == "@" or after == "@":
             continue
         url = m.group(0).strip(".,;")
+        if not _is_plausible_url(url):
+            continue
         host = _url_host(url)
         if not host:
             continue
@@ -577,6 +616,30 @@ def _clean_part(part: str) -> str:
 def _entry_role_company(header_rest: str):
     """Split a header line (minus dates) into (role, company) heuristically."""
     rest = header_rest.strip(" ,|•·-–—")
+    rest = re.sub(
+        rf"\b(?:{MONTH_RE_PART})\b\.?",
+        " ",
+        rest,
+        flags=re.IGNORECASE,
+    )
+    rest = re.sub(r"\s+", " ", rest).strip(" ,|•·-–—")
+    rest = re.sub(r"\bDuration\s*:\s*$", "", rest, flags=re.IGNORECASE).strip()
+    rest = re.sub(r"\([^)]*\)", "", rest).strip()
+
+    role_match = re.search(
+        r"\bRole\s*:\s*(.*?)(?=\bCompany\s*:|\bDuration\s*:|$)",
+        rest, re.IGNORECASE,
+    )
+    company_match = re.search(
+        r"\bCompany\s*:\s*(.*?)(?=\bRole\s*:|\bDuration\s*:|$)",
+        rest, re.IGNORECASE,
+    )
+    if role_match or company_match:
+        role = _clean_part(role_match.group(1)) if role_match else None
+        company = _clean_part(company_match.group(1)) if company_match else None
+        if company and company.lower() in {"not provided", "not specified", "n/a"}:
+            company = None
+        return role or None, company or None
 
     # "Role at Company" / "Role @ Company"
     m = re.search(r"\s(?:at|@)\s", rest, re.IGNORECASE)
@@ -608,13 +671,14 @@ def _extract_dated_entries(section_lines):
     """
     entries = []
     current = None
+    pending_header = []
 
     for line in section_lines:
         stripped = line.strip()
         if not stripped:
             continue
 
-        date_m = DATE_RANGE_RE.search(stripped)
+        date_m = MONTH_DATE_RANGE_RE.search(stripped) or DATE_RANGE_RE.search(stripped)
         single_year = None
         if not date_m:
             # single-year entry headers like "Intern, Google, 2023"
@@ -631,6 +695,7 @@ def _extract_dated_entries(section_lines):
         if is_header:
             if current is not None:
                 entries.append(current)
+                current = None
             duration = None
             rest = stripped
             if date_m:
@@ -639,6 +704,11 @@ def _extract_dated_entries(section_lines):
             else:
                 duration = single_year
                 rest = stripped.replace(single_year, "", 1)
+            if pending_header and not re.search(
+                "|".join(ROLE_KEYWORDS), rest, re.IGNORECASE
+            ):
+                rest = " ".join(pending_header + [rest])
+            pending_header = []
             role, company = _entry_role_company(rest)
             current = {
                 "role": role,
@@ -649,6 +719,17 @@ def _extract_dated_entries(section_lines):
         else:
             if current is not None:
                 current["body"].append(stripped)
+            elif (
+                len(stripped) <= 140
+                and not re.match(r"^[•·\-–—*]", stripped)
+                and (
+                    any(kw in stripped.lower() for kw in ROLE_KEYWORDS)
+                    or re.match(r"^Company\s*:", stripped, re.IGNORECASE)
+                    or re.search(r"\s(?:at|@)\s", stripped, re.IGNORECASE)
+                    or any(sep in stripped for sep in ("|", " - ", " – ", " — "))
+                )
+            ):
+                pending_header.append(stripped)
 
     if current is not None:
         entries.append(current)
@@ -783,18 +864,38 @@ def _extract_certifications(section_text: str) -> list:
 # ------------------------------------------------------------
 
 
-def _extract_achievements(section_text: str) -> dict:
+def _extract_achievements(section_text: str, default_bucket=None) -> dict:
     hackathons, awards, coding = [], [], []
+    non_content = {"references", "referees", "not provided", "none", "n/a",
+                   "na", "nil", "not applicable", "not specified"}
     for line in section_text.splitlines():
         stripped = line.strip(" •·-–—*")
         if not stripped:
             continue
         lowered = stripped.lower()
+        if lowered.rstrip(":") in non_content:
+            continue
+        if re.match(r"^(references|referees)\s*:?$", stripped, re.IGNORECASE):
+            continue
         if "hackathon" in lowered:
             hackathons.append(stripped)
+        elif (
+            default_bucket == "coding_achievements"
+            or "open source" in lowered
+            or "open-source" in lowered
+        ):
+            coding.append(stripped)
+        elif (
+            default_bucket == "awards"
+            or "extracurricular" in lowered
+            or "extra curricular" in lowered
+        ):
+            awards.append(stripped)
         elif any(w in lowered for w in ACHIEVEMENT_CODING_WORDS):
             coding.append(stripped)
         elif any(w in lowered for w in ACHIEVEMENT_AWARD_WORDS):
+            awards.append(stripped)
+        elif default_bucket == "hackathons":
             awards.append(stripped)
     return {
         "hackathons": hackathons,
@@ -862,10 +963,20 @@ def parse_resume(raw_text: str):
 
     # --- Achievements -----------------------------------------------
     achievements = {"hackathons": [], "awards": [], "coding_achievements": []}
-    if "achievements" in sections:
-        achievements = _extract_achievements(
-            _section_text(lines, sections["achievements"])
-        )
+    achievement_sections = {
+        "achievements": None,
+        "hackathons": "hackathons",
+        "open_source": "coding_achievements",
+        "extracurriculars": "awards",
+    }
+    for achievement_section, default_bucket in achievement_sections.items():
+        if achievement_section in sections:
+            extracted = _extract_achievements(
+                _section_text(lines, sections[achievement_section]),
+                default_bucket=default_bucket,
+            )
+            for key in achievements:
+                achievements[key].extend(extracted[key])
 
     profile = {
         "name": name,

@@ -48,9 +48,11 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from backend.tests.test_resume import (  # noqa: E402
     COMPLETE_RESUME,
+    COMPREHENSIVE_FAKE_RESUME_REGRESSION,
     MISSING_INFO_RESUME,
     MULTIPLE_INTERNSHIPS_RESUME,
     MULTIPLE_PROJECTS_RESUME,
+    REPORTED_PARSER_REGRESSION_RESUME,
     make_docx,
     make_pdf,
 )
@@ -205,6 +207,81 @@ def test_multiple_skills():
           "skills NOT converted to coding_skill_score")
 
 
+def test_reported_regressions_reach_profile_schema():
+    print("[5b] Reported parser regressions -> draft profile")
+    profile, completion = make_profile_from_text(REPORTED_PARSER_REGRESSION_RESUME)
+    check(profile["personal"]["portfolio"] is None,
+          "portfolio canonical empty value is None",
+          repr(profile["personal"]["portfolio"]))
+    check(len(profile["certifications"]) == 2,
+          "profile has exactly 2 certifications",
+          str(profile["certifications"]))
+    check(len(profile["internships"]) == 1,
+          "profile has Data Analytics internship",
+          str(profile["internships"]))
+    if profile["internships"]:
+        check(profile["internships"][0]["role"] == "Data Analytics Intern",
+              "profile internship role",
+              repr(profile["internships"][0]["role"]))
+        check(profile["internships"][0]["company"] == "DataMinds Analytics",
+              "profile internship organization",
+              repr(profile["internships"][0]["company"]))
+    check(completion["ml_feature_mapping"]["internships"] == 1,
+          "internship count mapped from extracted list",
+          repr(completion["ml_feature_mapping"]["internships"]))
+    check(completion["ml_feature_mapping"]["certifications"] == 2,
+          "certification count mapped from extracted list",
+          repr(completion["ml_feature_mapping"]["certifications"]))
+    check(completion["ml_feature_mapping"]["hackathons"] == 1,
+          "hackathon count mapped from extracted achievements",
+          repr(completion["ml_feature_mapping"]["hackathons"]))
+    check(profile["achievements"]["coding_achievements"] ==
+          ["Contributed bug fixes to an open-source analytics dashboard"],
+          "open-source preserved in supported profile field",
+          str(profile["achievements"]["coding_achievements"]))
+    check(profile["achievements"]["awards"] ==
+          ["Volunteer coordinator for college tech club"],
+          "extracurricular preserved in supported profile field",
+          str(profile["achievements"]["awards"]))
+
+
+def test_comprehensive_fake_resume_profile_mapping():
+    print("[5c] Comprehensive fake resume -> profile/provenance mapping")
+    profile, completion = make_profile_from_text(
+        COMPREHENSIVE_FAKE_RESUME_REGRESSION
+    )
+    check(profile["personal"]["portfolio"] is None,
+          "portfolio stays null")
+    check(profile["education"]["degree"] == "B.E.",
+          "education retained")
+    check(len(profile["projects"]) == 3, "three projects retained")
+    check(len(profile["certifications"]) == 2,
+          "profile contains exactly two certifications",
+          str(profile["certifications"]))
+    check(profile["internships"][0]["role"] == "Data Analytics Intern",
+          "clean internship role",
+          str(profile["internships"]))
+    check(profile["internships"][0]["company"] is None,
+          "company remains null without resume evidence")
+    check(profile["achievements"]["hackathons"] ==
+          ["Participated in the City Innovation Hackathon"],
+          "hackathon persists in canonical profile")
+    check(len(profile["achievements"]["awards"]) == 3,
+          "showcase and extracurricular details persist without references",
+          str(profile["achievements"]["awards"]))
+    check(len(profile["achievements"]["coding_achievements"]) == 1,
+          "open-source contribution persists")
+    check(profile["ml_inputs"] == {}, "resume does not populate manual ML inputs",
+          str(profile["ml_inputs"]))
+    check("achievements.hackathons" in profile["provenance"]["resume"],
+          "hackathon provenance retained")
+    check(profile["original_resume_values"].get("education.degree") == "B.E.",
+          "original resume values retained")
+    check(completion["ml_feature_mapping"]["open_source_contributions"] is None
+          and completion["ml_feature_mapping"]["extracurriculars"] is None,
+          "manual ML counts remain null")
+
+
 def test_manual_edits():
     print("[6] Manual edits via PUT")
     from app.services.profile_service import get_profile, update_profile
@@ -313,6 +390,8 @@ def test_service_suite():
     test_missing_internship()
     test_multiple_projects()
     test_multiple_skills()
+    test_reported_regressions_reach_profile_schema()
+    test_comprehensive_fake_resume_profile_mapping()
     test_manual_edits()
     test_verification()
     test_missing_ml_fields()

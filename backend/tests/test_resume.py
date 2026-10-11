@@ -121,6 +121,76 @@ Machine Learning Intern, Flipkart, 2024
 - Built a recommendation model
 """
 
+REPORTED_PARSER_REGRESSION_RESUME = """Priya Sharma
+priya.sharma@example.com
++91 90000 11111
+Portfolio: Not provided
+
+EDUCATION
+B.E. in Information Science, City Engineering College, CGPA: 8.4, 2021-2025
+
+SKILLS
+Python, SQL, Power BI, Git
+
+INTERNSHIP EXPERIENCE
+Data Analytics Intern | DataMinds Analytics
+May 2024 - July 2024
+- Cleaned datasets and built Power BI dashboards
+- Analyzed sales trends using Python and SQL
+
+CERTIFICATIONS
+Google Data Analytics Professional Certificate, Coursera, 2024
+Python for Data Science, IBM, 2023
+
+HACKATHONS
+Finalist, College Data Hackathon 2024
+
+OPEN SOURCE
+Contributed bug fixes to an open-source analytics dashboard
+
+EXTRACURRICULAR ACTIVITIES
+Volunteer coordinator for college tech club
+"""
+
+COMPREHENSIVE_FAKE_RESUME_REGRESSION = """Riya Sharma
+riya.sharma@example.com
+Portfolio: Not provided
+
+EDUCATION
+B.E. in Computer Science, City Engineering College, CGPA: 8.4, 2022-2026
+
+SKILLS
+Python, SQL
+
+INTERNSHIP EXPERIENCE
+Role: Data Analytics Intern (fictional test entry) Duration:
+January 2026 - March 2026
+- Queried reports using SQL
+
+PROJECTS
+- Student Placement Dashboard - A placement analytics dashboard
+- Resume Matcher - Matches resumes to jobs
+- Campus Events Portal - Lists campus events
+
+CERTIFICATIONS
+SQL for Data Analysis
+Python Fundamentals
+
+HACKATHONS AND ACHIEVEMENTS
+- Participated in the City Innovation Hackathon
+- Dashboard project showcase achievement
+
+EXTRACURRICULAR ACTIVITIES
+- Member of the Student Technology Club
+- Led peer programming activities
+
+OPEN-SOURCE CONTRIBUTIONS
+- Contributed documentation improvements to an open-source project
+
+REFERENCES
+Not provided
+"""
+
 # ------------------------------------------------------------
 # FILE GENERATORS
 # ------------------------------------------------------------
@@ -417,6 +487,87 @@ def test_multiple_internships():
     check(profile["education"]["degree"] == "B.E.", "degree", repr(profile["education"]["degree"]))
 
 
+def test_reported_parser_regressions():
+    print("[10] Reported resume parser regressions")
+    from app.services.resume_parser import parse_resume
+    profile, _, _ = parse_resume(REPORTED_PARSER_REGRESSION_RESUME)
+    check(profile["portfolio"] is None, "Portfolio: Not provided stays None",
+          repr(profile["portfolio"]))
+    check(profile["education"]["degree"] == "B.E.", "B.E. degree still extracted",
+          repr(profile["education"]["degree"]))
+    check(len(profile["certifications"]) == 2, "certifications stop at next section",
+          str(profile["certifications"]))
+    check(profile["certifications"][0]["name"] ==
+          "Google Data Analytics Professional Certificate", "cert 1 name",
+          repr(profile["certifications"][0]["name"] if profile["certifications"] else None))
+    check(len(profile["internships"]) == 1, "internship extracted",
+          str(profile["internships"]))
+    if profile["internships"]:
+        check(profile["internships"][0]["role"] == "Data Analytics Intern",
+              "internship role", repr(profile["internships"][0]["role"]))
+        check(profile["internships"][0]["company"] == "DataMinds Analytics",
+              "internship organization", repr(profile["internships"][0]["company"]))
+        check(profile["internships"][0]["duration"] == "May 2024 - July 2024",
+              "internship duration", repr(profile["internships"][0]["duration"]))
+        check("Python" in profile["internships"][0]["technologies"],
+              "internship responsibilities scanned for technologies",
+              str(profile["internships"][0]["technologies"]))
+    check(profile["achievements"]["hackathons"] ==
+          ["Finalist, College Data Hackathon 2024"], "hackathon extracted",
+          str(profile["achievements"]["hackathons"]))
+    check(profile["achievements"]["coding_achievements"] ==
+          ["Contributed bug fixes to an open-source analytics dashboard"],
+          "open-source section mapped to coding achievements",
+          str(profile["achievements"]["coding_achievements"]))
+    check(profile["achievements"]["awards"] ==
+          ["Volunteer coordinator for college tech club"],
+          "extracurricular section preserved in supported achievements field",
+          str(profile["achievements"]["awards"]))
+
+
+def test_comprehensive_fake_resume_regressions():
+    print("[11] Comprehensive fake resume parser regressions")
+    from app.services.resume_parser import parse_resume
+    profile, _, _ = parse_resume(COMPREHENSIVE_FAKE_RESUME_REGRESSION)
+    check(profile["portfolio"] is None, "missing portfolio remains None")
+    check(profile["education"]["degree"] == "B.E.", "education degree preserved")
+    check(len(profile["projects"]) == 3, "all three projects preserved",
+          str(profile["projects"]))
+    check([c["name"] for c in profile["certifications"]] ==
+          ["SQL for Data Analysis", "Python Fundamentals"],
+          "only the two certification entries extracted",
+          str(profile["certifications"]))
+    check(len(profile["internships"]) == 1, "internship extracted",
+          str(profile["internships"]))
+    if profile["internships"]:
+        internship = profile["internships"][0]
+        check(internship["role"] == "Data Analytics Intern",
+              "role label and parenthetical note removed", repr(internship["role"]))
+        check(internship["company"] is None,
+              "company left null when absent", repr(internship["company"]))
+        check(internship["duration"] == "January 2026 - March 2026",
+              "standalone duration extracted", repr(internship["duration"]))
+    check(profile["achievements"]["hackathons"] ==
+          ["Participated in the City Innovation Hackathon"],
+          "hackathon entry routed to hackathons",
+          str(profile["achievements"]["hackathons"]))
+    check(profile["achievements"]["awards"] == [
+          "Dashboard project showcase achievement",
+          "Member of the Student Technology Club",
+          "Led peer programming activities",
+          ], "achievement and extracurricular details preserved without references",
+          str(profile["achievements"]["awards"]))
+    check(profile["achievements"]["coding_achievements"] == [
+          "Contributed documentation improvements to an open-source project",
+          ], "open-source contribution preserved in coding achievements",
+          str(profile["achievements"]["coding_achievements"]))
+    all_achievements = sum(profile["achievements"].values(), [])
+    check("REFERENCES" not in all_achievements and
+          "Not provided" not in all_achievements,
+          "reference heading and missing text excluded",
+          str(all_achievements))
+
+
 def test_service_suite():
     print("=" * 60)
     print("SERVICE-LEVEL TESTS")
@@ -430,6 +581,8 @@ def test_service_suite():
     test_missing_information()
     test_multiple_projects()
     test_multiple_internships()
+    test_reported_parser_regressions()
+    test_comprehensive_fake_resume_regressions()
 
 
 # ------------------------------------------------------------
