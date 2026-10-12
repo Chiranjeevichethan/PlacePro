@@ -656,9 +656,15 @@ const SALARY_BRANCH_SYNONYMS = {
  */
 const SALARY_COLLEGE_TIERS = {
   ...COLLEGE_TIERS,
-  "Tier 1": "Tier-1",
-  "Tier 2": "Tier-2",
-  "Tier 3": "Tier-3",
+  "Tier 1": "Tier 1",
+  "Tier 2": "Tier 2",
+  "Tier 3": "Tier 3",
+  "Tier-1": "Tier 1",
+  "Tier-2": "Tier 2",
+  "Tier-3": "Tier 3",
+  "1": "Tier 1",
+  "2": "Tier 2",
+  "3": "Tier 3",
 };
 
 const mapSalaryBranch = (branch) => SALARY_BRANCH_SYNONYMS[branch] ?? branch;
