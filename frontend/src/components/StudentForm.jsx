@@ -3,15 +3,16 @@ import IconMark from "./IconMark";
 
 /**
  * Prediction form: collects EXACTLY the 16 inputs of the production
- * placement model (placepro-final-v1). Field values are constrained to
- * the training-distribution ranges below.
+ * placement model (placepro-final-v1). Score fields are constrained to
+ * the training-distribution ranges below; count fields accept any
+ * non-negative integer (no upper limit).
  *
  * codingSkill / communicationSkill keep the existing 0–100 UI scale;
  * the API service converts them to the model's 0–10 scale.
  */
 const RANGES = {
   cgpa: { min: 4, max: 10, step: 0.01, label: "CGPA" },
-  backlogs: { min: 0, max: 3, step: 1, label: "Backlogs" },
+  backlogs: { min: 0, max: null, step: 1, label: "Backlogs" },
   codingSkill: { min: 0, max: 100, step: 1, label: "Coding Skill" },
   dsaScore: { min: 1, max: 10, step: 0.1, label: "DSA Score" },
   aptitudeScore: { min: 20, max: 100, step: 1, label: "Aptitude Score" },
@@ -23,25 +24,37 @@ const RANGES = {
   },
   mlKnowledge: { min: 0, max: 10, step: 0.1, label: "ML Knowledge" },
   systemDesign: { min: 0, max: 10, step: 0.1, label: "System Design" },
-  internships: { min: 0, max: 3, step: 1, label: "Internships" },
-  projects: { min: 0, max: 5, step: 1, label: "Projects" },
-  certifications: { min: 0, max: 4, step: 1, label: "Certifications" },
-  hackathons: { min: 0, max: 3, step: 1, label: "Hackathons" },
+  internships: { min: 0, max: null, step: 1, label: "Internships" },
+  projects: { min: 0, max: null, step: 1, label: "Projects" },
+  certifications: { min: 0, max: null, step: 1, label: "Certifications" },
+  hackathons: { min: 0, max: null, step: 1, label: "Hackathons" },
   openSourceContributions: {
     min: 0,
-    max: 2,
+    max: null,
     step: 1,
     label: "Open Source Contributions",
   },
   extracurricular: {
     min: 0,
-    max: 3,
+    max: null,
     step: 1,
     label: "Extracurricular Activities",
   },
 };
 
 const REQUIRED_SELECTS = ["branch", "collegeTier"];
+
+// Count fields must be whole numbers (no upper limit — any non-negative
+// integer is accepted, including values above the training-data maximums).
+const INTEGER_FIELDS = [
+  "backlogs",
+  "internships",
+  "projects",
+  "certifications",
+  "hackathons",
+  "openSourceContributions",
+  "extracurricular",
+];
 
 const initialFormData = {
   branch: "",
@@ -101,7 +114,7 @@ const formSections = [
         placeholder: "4 - 10",
         step: "0.01",
       },
-      { name: "backlogs", label: "Backlogs", type: "number", placeholder: "0 - 3" },
+      { name: "backlogs", label: "Backlogs", type: "number", placeholder: "No. of active backlogs", min: "0", step: "1" },
     ],
   },
   {
@@ -136,12 +149,14 @@ const formSections = [
         placeholder: "0 - 10",
         step: "0.1",
       },
-      { name: "projects", label: "Projects", type: "number", placeholder: "0 - 5" },
+      { name: "projects", label: "Projects", type: "number", placeholder: "No. of projects completed", min: "0", step: "1" },
       {
         name: "certifications",
         label: "Certifications",
         type: "number",
-        placeholder: "0 - 4",
+        placeholder: "No. of certifications earned",
+        min: "0",
+        step: "1",
       },
     ],
   },
@@ -173,20 +188,26 @@ const formSections = [
         name: "internships",
         label: "Internships",
         type: "number",
-        placeholder: "0 - 3",
+        placeholder: "No. of internships completed",
+        min: "0",
+        step: "1",
       },
-      { name: "hackathons", label: "Hackathons", type: "number", placeholder: "0 - 3" },
+      { name: "hackathons", label: "Hackathons", type: "number", placeholder: "No. of hackathons participated", min: "0", step: "1" },
       {
         name: "openSourceContributions",
         label: "Open Source Contributions",
         type: "number",
-        placeholder: "0 - 2",
+        placeholder: "No. of open-source contributions",
+        min: "0",
+        step: "1",
       },
       {
         name: "extracurricular",
         label: "Extracurricular Activities",
         type: "number",
-        placeholder: "0 - 3",
+        placeholder: "No. of activities participated",
+        min: "0",
+        step: "1",
       },
     ],
   },
@@ -205,8 +226,13 @@ function StudentForm({ onPredict, isSubmitting = false }) {
 
       if (raw === "" || !Number.isFinite(value)) {
         nextErrors[field] = `${label} is required.`;
-      } else if (value < min || value > max) {
-        nextErrors[field] = `${label} must be between ${min} and ${max}.`;
+      } else if (value < min || (max !== null && value > max)) {
+        nextErrors[field] =
+          max !== null
+            ? `${label} must be between ${min} and ${max}.`
+            : `${label} must be at least ${min}.`;
+      } else if (INTEGER_FIELDS.includes(field) && !Number.isInteger(value)) {
+        nextErrors[field] = `${label} must be a whole number.`;
       }
     });
 
@@ -282,7 +308,7 @@ function StudentForm({ onPredict, isSubmitting = false }) {
             onChange={handleChange}
             placeholder={field.placeholder}
             min={field.min}
-            max={field.max}
+            max={field.max ?? undefined}
             step={field.step}
             className={hasError ? "invalid" : ""}
           />
