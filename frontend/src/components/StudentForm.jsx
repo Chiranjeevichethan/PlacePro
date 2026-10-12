@@ -1,5 +1,6 @@
 import { useState } from "react";
 import IconMark from "./IconMark";
+import { initialFormData } from "../data/formDefaults";
 
 /**
  * Prediction form: collects EXACTLY the 16 inputs of the production
@@ -55,25 +56,6 @@ const INTEGER_FIELDS = [
   "openSourceContributions",
   "extracurricular",
 ];
-
-const initialFormData = {
-  branch: "",
-  collegeTier: "",
-  cgpa: "",
-  backlogs: "",
-  codingSkill: "",
-  dsaScore: "",
-  aptitudeScore: "",
-  communicationSkill: "",
-  mlKnowledge: "",
-  systemDesign: "",
-  internships: "",
-  projects: "",
-  certifications: "",
-  hackathons: "",
-  openSourceContributions: "",
-  extracurricular: "",
-};
 
 const formSections = [
   {
@@ -213,8 +195,28 @@ const formSections = [
   },
 ];
 
-function StudentForm({ onPredict, isSubmitting = false }) {
-  const [formData, setFormData] = useState(initialFormData);
+// Count fields must be whole numbers (no upper limit — any non-negative
+// integer is accepted, including values above the training-data maximums).
+function StudentForm({
+  onPredict,
+  isSubmitting = false,
+  /* Controlled draft: when provided (App.jsx holds it above the page
+     switch), edits are mirrored to App so the form survives navigating
+     away and back. Omitted (or null) -> local state as before, so the
+     component still works standalone. */
+  draft,
+  onDraftChange,
+}) {
+  const [localDraft, setLocalDraft] = useState(initialFormData);
+  const formData = draft ?? localDraft;
+  const setFormData = (update) => {
+    const next = typeof update === "function" ? update(formData) : update;
+    if (onDraftChange) {
+      onDraftChange(next);
+    } else {
+      setLocalDraft(next);
+    }
+  };
   const [errors, setErrors] = useState({});
 
   const validate = (data) => {

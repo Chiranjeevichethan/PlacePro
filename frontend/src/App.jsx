@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Navbar from "./components/Navbar";
+import { initialFormData as initialPredictionDraft } from "./data/formDefaults";
 import Sidebar from "./components/Sidebar";
 
 import Login from "./pages/Login";
@@ -22,6 +23,12 @@ function App() {
   const [authenticated, setAuthenticated] = useState(() => isAuthenticated());
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [resumeProfileOpen, setResumeProfileOpen] = useState(false);
+
+  /* Draft student-form data. Lives in App (above the page switch) so the
+     user's in-progress Prediction form survives navigating to another
+     page and returning. Deliberately NOT reset by handleNavigate — the
+     draft only ever changes when the user edits it. */
+  const [predictionDraft, setPredictionDraft] = useState(initialPredictionDraft);
 
   if (!authenticated) {
     return (
@@ -77,7 +84,11 @@ function App() {
           )}
 
           {currentPage === "prediction" && (
-            <Prediction />
+            <Prediction
+              onNavigate={handleNavigate}
+              draft={predictionDraft}
+              onDraftChange={setPredictionDraft}
+            />
           )}
 
           {currentPage === "salary" && (

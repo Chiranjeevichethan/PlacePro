@@ -3,7 +3,7 @@ import StudentForm from "../components/StudentForm";
 import RecommendationPanel from "../components/RecommendationPanel";
 import { predictPlacement } from "../services/api";
 
-function Prediction() {
+function Prediction({ onNavigate, draft, onDraftChange }) {
   const [prediction, setPrediction] = useState(null);
   const [isPredicting, setIsPredicting] = useState(false);
   const [error, setError] = useState(null);
@@ -53,6 +53,8 @@ function Prediction() {
         <StudentForm
           onPredict={handlePrediction}
           isSubmitting={isPredicting}
+          draft={draft}
+          onDraftChange={onDraftChange}
         />
       </div>
 
@@ -172,6 +174,7 @@ function Prediction() {
               ========================================= */}
           <RecommendationPanel
             prediction={prediction}
+            onNavigate={onNavigate}
           />
         </>
       )}

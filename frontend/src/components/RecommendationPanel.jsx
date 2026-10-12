@@ -1,7 +1,10 @@
-function RecommendationPanel({ prediction }) {
+function RecommendationPanel({ prediction, onNavigate }) {
   const probability = Number(prediction?.probability ?? 72);
   const isLikelyPlaced = probability >= 60;
 
+  /* Each card navigates to an existing in-app page via the shared page
+     state in App.jsx (the app's only routing mechanism — no router lib).
+     All destinations map to real pages rendered in App.jsx. */
   const recommendations = [
     {
       icon: "💻",
@@ -9,6 +12,11 @@ function RecommendationPanel({ prediction }) {
       description:
         "Practice DSA and problem-solving regularly to strengthen your technical profile.",
       priority: "High Priority",
+      /* No dedicated coding-practice page exists; the closest real
+         feature is the skill-gap analysis over the student's strengths.
+         Mock Tests also offers Data Structures / Algorithms assessments. */
+      destination: "skillgap",
+      ariaLabel: "Open Skill Gap Analysis to strengthen coding skills",
     },
     {
       icon: "🎤",
@@ -16,6 +24,8 @@ function RecommendationPanel({ prediction }) {
       description:
         "Complete mock interviews to improve confidence and communication during placements.",
       priority: "High Priority",
+      destination: "mocktests",
+      ariaLabel: "Open Mock Tests to practice assessment questions",
     },
     {
       icon: "🚀",
@@ -23,6 +33,10 @@ function RecommendationPanel({ prediction }) {
       description:
         "Create practical projects and maintain a strong GitHub portfolio.",
       priority: "Medium Priority",
+      /* No project hub exists; the profile page is where the student
+         maintains projects and GitHub repository details. */
+      destination: "profile",
+      ariaLabel: "Open Student Profile to maintain projects and GitHub links",
     },
     {
       icon: "🎓",
@@ -30,18 +44,23 @@ function RecommendationPanel({ prediction }) {
       description:
         "Practice quantitative, logical reasoning and verbal aptitude questions.",
       priority: "Medium Priority",
+      destination: "mocktests",
+      ariaLabel: "Open Mock Tests to strengthen aptitude",
     },
   ];
 
   return (
-    <section className="recommendation-panel">
+    <section
+      className="recommendation-panel"
+      aria-labelledby="recommendation-heading"
+    >
       <div className="recommendation-header">
         <div>
           <span className="recommendation-eyebrow">
             PLACEPRO INSIGHTS
           </span>
 
-          <h2>
+          <h2 id="recommendation-heading">
             {isLikelyPlaced
               ? "You're on the right track 🚀"
               : "Let's improve your placement readiness 🚀"}
@@ -64,7 +83,13 @@ function RecommendationPanel({ prediction }) {
 
       <div className="recommendation-list">
         {recommendations.map((item, index) => (
-          <div className="recommendation-item" key={index}>
+          <button
+            className="recommendation-item"
+            key={index}
+            type="button"
+            onClick={() => onNavigate(item.destination)}
+            aria-label={item.ariaLabel}
+          >
             <div className="recommendation-icon">
               {item.icon}
             </div>
@@ -81,10 +106,10 @@ function RecommendationPanel({ prediction }) {
               <p>{item.description}</p>
             </div>
 
-            <div className="recommendation-arrow">
+            <div className="recommendation-arrow" aria-hidden="true">
               →
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </section>

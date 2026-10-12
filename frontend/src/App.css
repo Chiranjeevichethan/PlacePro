@@ -2727,6 +2727,9 @@ body {
   gap: 14px;
 }
 
+/* Full-card clickable recommendation: rendered as a <button> for
+   semantic/keyboard accessibility, visually styled identically to the
+   original card. */
 .recommendation-item {
   display: flex;
   align-items: center;
@@ -2741,10 +2744,22 @@ body {
 
   border-radius: 14px;
 
+  /* Button reset — keep the card's original look, drop UA chrome. */
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease,
     border-color 0.2s ease;
+}
+
+.recommendation-item:focus-visible {
+  outline: 2px solid #4f46e5;
+
+  outline-offset: 2px;
 }
 
 .recommendation-item:hover {
