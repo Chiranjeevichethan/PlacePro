@@ -2,11 +2,10 @@
 # PLACEPRO - PHASE 12 - READINESS / SKILL-GAP TEST SUITE
 # ============================================================
 #
-# Plain-python tests (no pytest/requests dependency):
+# Run through pytest (the script entry point uses the same fixtures):
 #   python backend/tests/test_readiness.py
 #
-# Service-level tests always run (profiles in a temp dir).
-# HTTP tests run when a server is reachable at PLACEPRO_API_URL.
+# Pytest isolates each service test and manages the live HTTP server.
 #
 # Coverage (per Phase 12 spec):
 #   1.  Verified complete profile
@@ -31,20 +30,13 @@
 #
 # ============================================================
 
-import json
 import os
 import sys
-import tempfile
-import urllib.error
-import urllib.request
-import uuid
+
+import pytest
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-# Isolate the profile store (set BEFORE importing the service)
-_TMP_PROFILES = tempfile.mkdtemp(prefix="placepro_profiles_readiness_test_")
-os.environ["PLACEPRO_PROFILES_DIR"] = _TMP_PROFILES
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
@@ -56,7 +48,12 @@ from backend.tests.test_resume import (  # noqa: E402
     make_pdf,
 )
 
-API_URL = os.environ.get("PLACEPRO_API_URL", "http://127.0.0.1:8000")
+from backend.tests.support import (  # noqa: E402
+    http_get,
+    http_post_json,
+    http_put_json,
+    multipart_post,
+)
 
 COMPLETE_ML_INPUTS = {
     "college_tier": "Tier-1", "backlogs": 0, "coding_skills": 7.5,
@@ -77,7 +74,7 @@ ALL_CORE_SKILLS = [
 
 def _draft():
     """Draft profile from the COMPLETE_RESUME fixture (unverified)."""
-    from app.services.profile_service import build_draft_from_resume
+    from backend.app.services.profile_service import build_draft_from_resume
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     profile, _ = build_draft_from_resume("resume.pdf", pdf, "application/pdf")
     return profile
@@ -86,7 +83,7 @@ def _draft():
 def _profile(skills=None, projects=None, internships=None, certs=None,
              ml_inputs=None, verified=True):
     """Build a profile with controlled skills/experience, then verify."""
-    from app.services.profile_service import verify_profile
+    from backend.app.services.profile_service import verify_profile
     profile = _draft()
     empty_skills = {
         "programming_languages": [], "frameworks": [], "databases": [],
@@ -134,86 +131,17 @@ def _empty_skills_profile():
 
 
 # ------------------------------------------------------------
-# HTTP HELPERS
-# ------------------------------------------------------------
-
-
-def multipart_post(url, field_name, filename, content, content_type):
-    boundary = "----PlaceProBoundary" + uuid.uuid4().hex
-    body = b""
-    body += f"--{boundary}\r\n".encode()
-    body += (f'Content-Disposition: form-data; name="{field_name}"; '
-             f'filename="{filename}"\r\n').encode()
-    body += f"Content-Type: {content_type}\r\n\r\n".encode()
-    body += content + b"\r\n"
-    body += f"--{boundary}--\r\n".encode()
-    req = urllib.request.Request(
-        url, data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode("utf-8"))
-
-
-def http_get(url):
-    try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise AssertionError(f"Server not reachable: {exc.reason}")
-
-
-def http_post_json(url, payload):
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode("utf-8"))
-
-
-def http_put_json(url, payload):
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="PUT",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode("utf-8"))
-
-
-# ------------------------------------------------------------
 # SERVICE-LEVEL TESTS
 # ------------------------------------------------------------
 
-PASS = 0
-FAIL = 0
-
-
 def check(condition, label, extra=""):
-    global PASS, FAIL
-    if condition:
-        PASS += 1
-        print(f"  ✅ {label}")
-    else:
-        FAIL += 1
-        print(f"  ❌ {label} {extra}")
+    assert condition, f"{label}: {extra}"
+    print(f"  ✅ {label}")
 
 
 def test_verified_complete():
     print("[1] Verified complete profile")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     r = get_readiness(_complete_profile()["profile_id"])
     check(r["readiness_score"] == 100, "score is 100", str(r["readiness_score"]))
     check(r["readiness_level"] == "Highly Ready", "level Highly Ready",
@@ -225,7 +153,7 @@ def test_verified_complete():
 
 def test_unverified():
     print("[2] Unverified profile")
-    from app.services.readiness_service import (
+    from backend.app.services.readiness_service import (
         ReadinessServiceError,
         get_readiness,
     )
@@ -239,7 +167,7 @@ def test_unverified():
 
 def test_strong_technical():
     print("[3] Strong technical skills")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     profile = _profile(
         skills=ALL_CORE_SKILLS + ["Python", "Git", "SQL", "Communication"],
         projects=[
@@ -262,7 +190,7 @@ def test_strong_technical():
 
 def test_few_skills():
     print("[4] Student with few skills")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     profile = _profile(
         skills=["Python"],
         projects=[], internships=[], certs=[],
@@ -279,7 +207,7 @@ def test_few_skills():
 
 def test_multiple_projects():
     print("[5] Student with multiple projects")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     projects = [
         {"project_name": "A", "description": "d", "technologies": ["Python"]},
         {"project_name": "B", "description": "d", "technologies": ["Python"]},
@@ -299,7 +227,7 @@ def test_multiple_projects():
 
 def test_internships():
     print("[6] Student with internships")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     internships = [
         {"company": "A", "role": "SWE", "duration": "3m",
          "technologies": ["Python"]},
@@ -311,6 +239,7 @@ def test_internships():
     check(r["readiness_breakdown"]["internships"] == 15, "internships full 15",
           str(r["readiness_breakdown"]["internships"]))
     py_strengths = [s for s in r["strengths"] if s["skill"] == "Python"]
+    check(bool(py_strengths), "Python is a strength from internships")
     if py_strengths:
         evidence = " ".join(py_strengths[0]["evidence"])
         check("2 internships" in evidence, "evidence mentions 2 internships",
@@ -319,7 +248,7 @@ def test_internships():
 
 def test_missing_skills():
     print("[7] Missing skills")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     profile = _profile(
         skills=["Python"],  # no SQL, no Git, no core CS
         projects=[], internships=[], certs=[],
@@ -335,7 +264,7 @@ def test_missing_skills():
 
 def test_normalization():
     print("[8] Skill normalization")
-    from app.services.readiness_service import collect_verified_skills
+    from backend.app.services.readiness_service import collect_verified_skills
     profile = _profile(
         skills=["js", "reactjs", "node", "mysql", "ml",
                 "scikit learn", "dsa", "cpp", "typescript"],
@@ -354,7 +283,7 @@ def test_normalization():
 
 def test_provenance():
     print("[9] Skill provenance")
-    from app.services.readiness_service import collect_verified_skills
+    from backend.app.services.readiness_service import collect_verified_skills
     profile = _profile(skills=["Python"], verified=True)
     profile["projects"] = [{"project_name": "P", "description": "d",
                             "technologies": ["Java"]}]
@@ -362,7 +291,7 @@ def test_provenance():
                                "technologies": ["Git"]}]
     profile["certifications"] = [{"name": "AWS Certified Solutions Architect",
                                   "issuer": "Amazon", "year": 2025}]
-    from app.services.profile_service import verify_profile
+    from backend.app.services.profile_service import verify_profile
     profile, _ = verify_profile(profile)
     entries = collect_verified_skills(profile)
     # A skill may appear in several sources (Python is also in the
@@ -384,7 +313,7 @@ def test_provenance():
 
 def test_score_range():
     print("[10] Readiness score range 0-100")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     for profile in (
         _empty_skills_profile(),
         _profile(skills=["Python"]),
@@ -399,7 +328,7 @@ def test_score_range():
 
 def test_levels():
     print("[11] Correct readiness level")
-    from app.services.readiness_service import readiness_level
+    from backend.app.services.readiness_service import readiness_level
     check(readiness_level(30) == "Needs Improvement", "30 -> Needs Improvement")
     check(readiness_level(50) == "Developing", "50 -> Developing")
     check(readiness_level(70) == "Placement Ready", "70 -> Placement Ready")
@@ -409,7 +338,7 @@ def test_levels():
 
 def test_priorities():
     print("[12] Skill-gap priorities")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     r = get_readiness(_empty_skills_profile()["profile_id"])
     priorities = {g["skill"]: g["priority"] for g in r["skill_gaps"]}
     for core in ("Data Structures", "Algorithms", "OOP"):
@@ -424,7 +353,7 @@ def test_priorities():
 
 def test_improvement_plan():
     print("[13] Improvement plan")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     r = get_readiness(_empty_skills_profile()["profile_id"])
     plan = r["improvement_plan"]
     check(len(plan) == len(r["skill_gaps"]), "one item per gap",
@@ -439,7 +368,7 @@ def test_improvement_plan():
         plan[i]["priority"] < plan[j]["priority"]
         for i in range(len(plan)) for j in range(i + 1, len(plan))
         if plan[i]["skill"] != plan[j]["skill"]
-    ) or True  # ordering by requirement order is acceptable; check labels:
+    )
     order_ok = True
     seen_medium = False
     for item in plan:
@@ -454,7 +383,7 @@ def test_improvement_plan():
 
 def test_empty_skills():
     print("[14] Empty skills")
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.readiness_service import get_readiness
     r = get_readiness(_empty_skills_profile()["profile_id"])
     check(r["strengths"] == [], "no strengths with no skills")
     check(len(r["skill_gaps"]) >= 8, "all requirement gaps present",
@@ -487,32 +416,34 @@ def test_service_suite():
 # ------------------------------------------------------------
 
 
-def _http_verified_complete_profile():
+def _http_verified_complete_profile(api_url):
     """Create a verified complete profile via the API."""
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     status, body = multipart_post(
-        f"{API_URL}/api/profile/from-resume", "file", "resume.pdf", pdf,
+        f"{api_url}/api/profile/from-resume", "file", "resume.pdf", pdf,
         "application/pdf",
     )
     assert status == 200, f"from-resume failed: {status} {body}"
     profile = body["profile"]
     pid = profile["profile_id"]
     profile["ml_inputs"] = dict(COMPLETE_ML_INPUTS)
-    status, body = http_put_json(f"{API_URL}/api/profile/{pid}", profile)
+    status, body = http_put_json(f"{api_url}/api/profile/{pid}", profile)
     assert status == 200, f"PUT failed: {status} {body}"
-    status, body = http_post_json(f"{API_URL}/api/profile/verify",
+    status, body = http_post_json(f"{api_url}/api/profile/verify",
                                   body["profile"])
     assert status == 200 and body["profile"]["verified"], f"verify failed"
     return pid
 
 
-def test_http_suite():
+@pytest.mark.live_http
+def test_http_suite(live_server_url):
+    api_url = live_server_url
     print("\n" + "=" * 60)
     print("HTTP-LEVEL TESTS (PHASE 12)")
     print("=" * 60)
 
     # --- /health ---------------------------------------------------
-    status, body = http_get(f"{API_URL}/health")
+    status, body = http_get(f"{api_url}/health")
     check(status == 200 and body.get("status") == "ok", "GET /health")
 
     # --- [15] Existing Phase 8 prediction ---------------------------
@@ -524,27 +455,27 @@ def test_http_suite():
         "projects_count": 4, "certifications": 2, "hackathons": 1,
         "open_source_contributions": 1, "extracurriculars": 1,
     }
-    status, body = http_post_json(f"{API_URL}/api/predict", payload)
+    status, body = http_post_json(f"{api_url}/api/predict", payload)
     check(status == 200 and body.get("prediction") in ("PLACED", "NOT PLACED"),
           "[15] POST /api/predict still works", f"status={status}")
 
     # --- [16] Existing Phase 9 resume extraction ---------------------
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     status, body = multipart_post(
-        f"{API_URL}/api/resume/upload", "file", "resume.pdf", pdf,
+        f"{api_url}/api/resume/upload", "file", "resume.pdf", pdf,
         "application/pdf",
     )
     check(status == 200 and body.get("success") is True,
           "[16] POST /api/resume/upload still works", f"status={status}")
 
     # --- [17] Existing Phase 10 profile flow -------------------------
-    pid = _http_verified_complete_profile()
-    status, body = http_get(f"{API_URL}/api/profile/{pid}")
+    pid = _http_verified_complete_profile(api_url)
+    status, body = http_get(f"{api_url}/api/profile/{pid}")
     check(status == 200 and body["profile"]["verified"] is True,
           "[17] Phase 10 profile flow still works", f"status={status}")
 
     # --- [18] Existing Phase 11 prediction flow ----------------------
-    status, body = http_post_json(f"{API_URL}/api/profile/{pid}/predict", {})
+    status, body = http_post_json(f"{api_url}/api/profile/{pid}/predict", {})
     check(status == 200 and body["ready_for_prediction"] is True,
           "[18] Phase 11 prediction flow still works", f"status={status}")
     if status == 200:
@@ -552,7 +483,7 @@ def test_http_suite():
         check(0.0 <= body["placement_probability"] <= 1.0, "prob in range")
 
     # --- New: readiness for verified profile -------------------------
-    status, body = http_get(f"{API_URL}/api/profile/{pid}/readiness")
+    status, body = http_get(f"{api_url}/api/profile/{pid}/readiness")
     check(status == 200, "GET readiness 200", f"status={status}")
     if status == 200:
         check(0 <= body["readiness_score"] <= 100, "readiness score 0-100")
@@ -567,20 +498,21 @@ def test_http_suite():
 
     # --- New: readiness for UNVERIFIED profile -> 422 ----------------
     status2, body2 = multipart_post(
-        f"{API_URL}/api/profile/from-resume", "file", "resume.pdf", pdf,
+        f"{api_url}/api/profile/from-resume", "file", "resume.pdf", pdf,
         "application/pdf",
     )
+    check(status2 == 200, "setup: unverified profile created", f"{status2} {body2}")
     pid2 = body2["profile"]["profile_id"]
-    status2, body2 = http_get(f"{API_URL}/api/profile/{pid2}/readiness")
+    status2, body2 = http_get(f"{api_url}/api/profile/{pid2}/readiness")
     check(status2 == 422, "unverified readiness -> 422", f"status={status2}")
 
     # --- New: readiness for unknown profile -> 404 -------------------
-    status2, _ = http_get(f"{API_URL}/api/profile/nope/readiness")
+    status2, _ = http_get(f"{api_url}/api/profile/nope/readiness")
     check(status2 == 404, "unknown profile readiness -> 404",
           f"status={status2}")
 
     # --- New: placement-summary (verified complete) ------------------
-    status, body = http_get(f"{API_URL}/api/profile/{pid}/placement-summary")
+    status, body = http_get(f"{api_url}/api/profile/{pid}/placement-summary")
     check(status == 200, "GET placement-summary 200", f"status={status}")
     if status == 200:
         check(body["ready_for_prediction"] is True, "ready for prediction")
@@ -596,16 +528,17 @@ def test_http_suite():
 
     # --- New: placement-summary (verified but ML-incomplete) ----------
     status2, body2 = multipart_post(
-        f"{API_URL}/api/profile/from-resume", "file", "resume.pdf", pdf,
+        f"{api_url}/api/profile/from-resume", "file", "resume.pdf", pdf,
         "application/pdf",
     )
+    check(status2 == 200, "setup: incomplete profile created", f"{status2} {body2}")
     pid3 = body2["profile"]["profile_id"]
-    status2, body2 = http_post_json(f"{API_URL}/api/profile/verify",
+    status2, body2 = http_post_json(f"{api_url}/api/profile/verify",
                                     body2["profile"])
     check(status2 == 200 and body2["profile"]["verified"] is True,
           "setup: verified but incomplete profile")
     status2, body2 = http_get(
-        f"{API_URL}/api/profile/{pid3}/placement-summary")
+        f"{api_url}/api/profile/{pid3}/placement-summary")
     check(status2 == 200, "placement-summary incomplete 200",
           f"status={status2}")
     if status2 == 200:
@@ -621,22 +554,4 @@ def test_http_suite():
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    test_service_suite()
-
-    server_up = False
-    try:
-        status, _ = http_get(f"{API_URL}/health")
-        server_up = status == 200
-    except AssertionError:
-        server_up = False
-
-    if server_up:
-        test_http_suite()
-    else:
-        print(f"\n⚠️  Server not reachable at {API_URL} - skipping HTTP tests.")
-        print("   Start it with:  uvicorn backend.app.main:app --reload")
-
-    print(f"\n{'=' * 60}")
-    print(f"RESULT: {PASS} passed, {FAIL} failed")
-    print("=" * 60)
-    sys.exit(1 if FAIL else 0)
+    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))

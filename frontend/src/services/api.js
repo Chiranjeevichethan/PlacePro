@@ -12,19 +12,22 @@
  * returned as-is — nothing is mocked or recomputed here.
  */
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8765";
+import { API_BASE_URL, authenticatedFetch } from './apiTransport.js';
+import { buildExperimentalV1Payload } from './experimentalV1Payload.js';
+export { API_BASE_URL } from './apiTransport.js';
 
 /**
  * Branch vocabulary of the production model:
  * CSE, IT, ECE, EE, ME, CE, Chemical.
  *
- * "Information Science" is the frontend's existing synonym for the
- * Information-Science family; the backend maps that family to "CSE".
- * This is the only synonym kept here — no other branch mappings exist.
+ * The Information-Science family is a frontend label; the model's dataset
+ * has no ISE category, so those spellings are mapped to "CSE". This is the
+ * existing mapping (no new categories are invented).
  */
 const BRANCH_SYNONYMS = {
+  ISE: "CSE",
   "Information Science": "CSE",
+  "Information Science and Engineering": "CSE",
 };
 
 /** Frontend tier values ("1" | "2" | "3") → canonical backend values. */
@@ -44,18 +47,22 @@ export async function fetchStudentProfile(profileId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the profile service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error("Student profile was not found.");
+      const error = new Error("Student profile was not found.");
+      error.code = 'PROFILE_NOT_FOUND';
+      error.status = 404;
+      throw error;
     }
 
     throw new Error("Unable to load student profile. Please try again.");
@@ -65,8 +72,9 @@ export async function fetchStudentProfile(profileId) {
 
   try {
     data = await response.json();
-  } catch {
-    throw new Error("Unable to load student profile. Please try again.");
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error("Unable to load student profile. Please try again.", { cause });
   }
 
   if (!data?.profile) {
@@ -83,33 +91,41 @@ export async function fetchStudentProfile(profileId) {
  * { profile, completion, message } (the updated profile).
  * Throws an Error with a user-readable message on any failure.
  */
-export async function updateStudentProfile(profileId, payload) {
+export async function updateStudentProfile(profileId, payload, requestId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        ...(requestId ? { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId } } : {}),
       }
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the profile service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
+    if (response.status === 409) {
+      const error = new Error('Profile changed since it was loaded. Reload it and review your edits before saving.');
+      error.status = 409;
+      throw error;
+    }
     if (response.status === 422) {
       let detail = null;
 
       try {
         const body = await response.json();
         detail = body?.detail ?? null;
-      } catch {
+      } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
         // Body could not be parsed; fall back to the generic message below.
       }
 
@@ -127,8 +143,9 @@ export async function updateStudentProfile(profileId, payload) {
 
   try {
     data = await response.json();
-  } catch {
-    throw new Error("Unable to save profile changes. Please try again.");
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error("Unable to save profile changes. Please try again.", { cause });
   }
 
   if (!data?.profile) {
@@ -144,7 +161,7 @@ export async function updateStudentProfile(profileId, payload) {
  * GET /api/profile/{id}/readiness -> ReadinessResponse:
  *   {
  *     profile_id,
- *     readiness_score,          // integer 0-100 (rule-based, NOT the ML probability)
+ *     readiness_score,          // number 0-100, may be fractional (rule-based)
  *     readiness_level,          // e.g. "Placement Ready"
  *     readiness_breakdown,      // documented 0-100 score components
  *     strengths: [{ skill, category?, evidence? }],
@@ -160,13 +177,14 @@ export async function fetchStudentReadiness(profileId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/readiness`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the readiness service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -181,8 +199,9 @@ export async function fetchStudentReadiness(profileId) {
 
   try {
     data = await response.json();
-  } catch {
-    throw new Error("Unable to load readiness data. Please try again.");
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error("Unable to load readiness data. Please try again.", { cause });
   }
 
   /* Malformed 200: validate the required top-level structure instead of
@@ -190,7 +209,9 @@ export async function fetchStudentReadiness(profileId) {
   if (
     !data ||
     typeof data !== "object" ||
-    !Number.isFinite(Number(data.readiness_score)) ||
+    typeof data.readiness_score !== "number" ||
+    !Number.isFinite(data.readiness_score) ||
+    data.readiness_score < 0 || data.readiness_score > 100 ||
     typeof data.readiness_level !== "string" ||
     !data.readiness_breakdown ||
     typeof data.readiness_breakdown !== "object"
@@ -239,15 +260,16 @@ export async function fetchCompanyRecommendations(profileId, limit) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/recommendations${
         query ? `?${query}` : ""
       }`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the recommendations service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -262,8 +284,9 @@ export async function fetchCompanyRecommendations(profileId, limit) {
 
   try {
     data = await response.json();
-  } catch {
-    throw new Error("Unable to load recommendations. Please try again.");
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error("Unable to load recommendations. Please try again.", { cause });
   }
 
   /* Malformed 200: validate the required structure instead of substituting
@@ -303,7 +326,8 @@ export async function fetchCompanyRecommendations(profileId, limit) {
  *     model_version: string | null,
  *     missing_fields: string[],
  *     reason: string | null,
- *     readiness: { ...full Phase 12 readiness response }
+ *     readiness_score, readiness_level, readiness_breakdown,
+ *     strengths[], skill_gaps[], improvement_plan[]
  *   }
  *
  * The backend is authoritative: probability/confidence/prediction are
@@ -315,15 +339,16 @@ export async function fetchPlacementSummary(profileId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(
         profileId
       )}/placement-summary`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the placement summary service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -337,7 +362,8 @@ export async function fetchPlacementSummary(profileId) {
       try {
         const body = await response.json();
         detail = body?.detail ?? null;
-      } catch {
+      } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
         // Body could not be parsed; fall back to the generic message below.
       }
 
@@ -355,10 +381,11 @@ export async function fetchPlacementSummary(profileId) {
 
   try {
     data = await response.json();
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "The placement summary service returned an unexpected response. Please try again."
-    );
+    , { cause });
   }
 
   /* Malformed 200: require an object; the nullable fields are validated
@@ -390,7 +417,9 @@ export async function fetchPlacementSummary(profileId) {
  *                            assessment_id, timestamp }],
  *     readiness: { ...full readiness response },
  *     skills: [{ skill, resume_detected, user_entered,
- *                assessment_score, assessment_verified, level }]
+ *                assessment_score, assessment_verified, level,
+ *                evidence_status, evidence_sources, profile_confirmed,
+ *                assessment_timestamp }]
  *   }
  *
  * The backend is authoritative: counts, scores, and histories are returned
@@ -401,13 +430,14 @@ export async function fetchPerformance(profileId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/performance`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the performance service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -421,7 +451,8 @@ export async function fetchPerformance(profileId) {
       try {
         const body = await response.json();
         detail = body?.detail ?? null;
-      } catch {
+      } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
         // Body could not be parsed; fall back to the generic message below.
       }
 
@@ -439,10 +470,11 @@ export async function fetchPerformance(profileId) {
 
   try {
     data = await response.json();
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "The performance service returned an unexpected response. Please try again."
-    );
+    , { cause });
   }
 
   /* Malformed 200: validate the top-level structure instead of
@@ -490,7 +522,10 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : NaN;
 };
 
-const toInteger = (value) => Math.round(toNumber(value));
+const toInteger = (value) => {
+  const number = toNumber(value);
+  return Number.isInteger(number) ? number : NaN;
+};
 
 const mapBranch = (branch) => BRANCH_SYNONYMS[branch] ?? branch;
 
@@ -504,10 +539,10 @@ const mapCollegeTier = (tier) => COLLEGE_TIERS[tier] ?? tier;
  *   college_tier               ← collegeTier ("1" → "Tier-1", etc.)
  *   cgpa                       ← cgpa
  *   backlogs                   ← backlogs
- *   coding_skills              ← codingSkill / 10   (0–100 UI → 0–10)
+ *   coding_skills              ← codingSkill        (UI 1–10 = model scale)
  *   dsa_score                  ← dsaScore
  *   aptitude_score             ← aptitudeScore
- *   communication_skills       ← communicationSkill / 10
+ *   communication_skills       ← communicationSkill (UI 1–10 = model scale)
  *   ml_knowledge               ← mlKnowledge
  *   system_design              ← systemDesign
  *   internships                ← internships
@@ -518,7 +553,7 @@ const mapCollegeTier = (tier) => COLLEGE_TIERS[tier] ?? tier;
  *   extracurriculars           ← extracurricular
  *
  * All values are real numbers (never numeric strings, null, or NaN);
- * count fields are rounded to integers. Categorical encoding is left to
+ * count fields must be integers. Categorical encoding is left to
  * the backend pipeline — raw strings are sent.
  */
 export function buildPredictionPayload(formData) {
@@ -527,10 +562,10 @@ export function buildPredictionPayload(formData) {
     college_tier: mapCollegeTier(formData.collegeTier),
     cgpa: toNumber(formData.cgpa),
     backlogs: toInteger(formData.backlogs),
-    coding_skills: toNumber(formData.codingSkill) / 10,
+    coding_skills: toNumber(formData.codingSkill),
     dsa_score: toNumber(formData.dsaScore),
     aptitude_score: toNumber(formData.aptitudeScore),
-    communication_skills: toNumber(formData.communicationSkill) / 10,
+    communication_skills: toNumber(formData.communicationSkill),
     ml_knowledge: toNumber(formData.mlKnowledge),
     system_design: toNumber(formData.systemDesign),
     internships: toInteger(formData.internships),
@@ -571,17 +606,18 @@ async function requestPrediction(payload) {
   let response;
 
   try {
-    response = await fetch(`${API_BASE_URL}/api/predict`, {
+    response = await authenticatedFetch(`${API_BASE_URL}/api/predict`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the prediction service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -591,7 +627,8 @@ async function requestPrediction(payload) {
       try {
         const body = await response.json();
         detail = body?.detail ?? null;
-      } catch {
+      } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
         // Body could not be parsed; fall back to the generic message below.
       }
 
@@ -615,10 +652,15 @@ async function requestPrediction(payload) {
  *   model_version → modelVersion (displayed as-is)
  */
 function normalizePredictionResponse(data) {
-  const probabilityValue = toNumber(data?.placement_probability);
-  const confidenceValue = toNumber(data?.confidence);
+  const probabilityValue = data?.placement_probability;
+  const confidenceValue = data?.confidence;
 
-  if (!Number.isFinite(probabilityValue) || !Number.isFinite(confidenceValue)) {
+  if (
+    typeof probabilityValue !== 'number' || !Number.isFinite(probabilityValue) || probabilityValue < 0 || probabilityValue > 1 ||
+    typeof confidenceValue !== 'number' || !Number.isFinite(confidenceValue) || confidenceValue < 0 || confidenceValue > 1 ||
+    !['PLACED', 'NOT PLACED'].includes(data?.prediction) ||
+    typeof data?.model_version !== 'string' || !data.model_version.trim()
+  ) {
     throw new Error(
       "The prediction service returned an invalid response. Please try again."
     );
@@ -629,7 +671,7 @@ function normalizePredictionResponse(data) {
     status:
       data.prediction === "PLACED" ? "LIKELY PLACED" : "PLACEMENT RISK",
     confidence: Math.round(confidenceValue * 100),
-    modelVersion: data.model_version ?? null,
+    modelVersion: data.model_version,
   };
 }
 
@@ -649,36 +691,14 @@ const SALARY_BRANCH_SYNONYMS = {
   "Information Science and Engineering": "CSE",
 };
 
-/**
- * College-tier spellings that can appear in profile data -> canonical
- * backend values (Tier-1 / Tier-2 / Tier-3). Reuses the placement form's
- * "1" | "2" | "3" mapping and adds the display spellings.
- */
-const SALARY_COLLEGE_TIERS = {
-  ...COLLEGE_TIERS,
-  "Tier 1": "Tier 1",
-  "Tier 2": "Tier 2",
-  "Tier 3": "Tier 3",
-  "Tier-1": "Tier 1",
-  "Tier-2": "Tier 2",
-  "Tier-3": "Tier 3",
-  "1": "Tier 1",
-  "2": "Tier 2",
-  "3": "Tier 3",
-};
-
 const mapSalaryBranch = (branch) => SALARY_BRANCH_SYNONYMS[branch] ?? branch;
-
-const mapSalaryCollegeTier = (tier) => SALARY_COLLEGE_TIERS[tier] ?? tier;
 
 /**
  * Map the salary form data (prefilled from the student profile) to the
- * EXACT 16 model fields expected by POST /api/salary-predict. Nothing else
- * is sent - in particular no student id, placement status, or stored
- * salary value:
+ * model fields expected by POST /api/salary-predict. Nothing else is sent -
+ * in particular no student id, placement status, or stored salary value:
  *
  *   branch                     <- branch (canonical or ISE family -> "CSE")
- *   college_tier               <- collegeTier (canonical or "Tier 2" -> "Tier-2")
  *   cgpa                       <- cgpa
  *   backlogs                   <- backlogs
  *   coding_skills              <- codingSkills      (profile 0-10 scale)
@@ -694,16 +714,20 @@ const mapSalaryCollegeTier = (tier) => SALARY_COLLEGE_TIERS[tier] ?? tier;
  *   open_source_contributions  <- openSourceContributions
  *   extracurriculars           <- extracurriculars
  *
+ * A known profile collegeTier is supplied to the existing optional API field.
+ * Missing tier is omitted and retains the backend's configured fallback.
+ *
  * Unlike the placement form, coding_skills / communication_skills arrive on
  * the profile's existing 0-10 scale and are sent unchanged. All values are
  * real numbers (never numeric strings, null, or NaN); count fields are
- * rounded to integers. Categorical encoding is left to the backend
+ * required to be integers. Categorical encoding is left to the backend
  * pipeline - raw strings are sent.
  */
 export function buildSalaryPayload(formData) {
   return {
     branch: mapSalaryBranch(formData.branch),
-    college_tier: mapSalaryCollegeTier(formData.collegeTier),
+    ...(typeof formData.collegeTier === 'string' && formData.collegeTier.trim()
+      ? { college_tier: mapCollegeTier(formData.collegeTier) } : {}),
     cgpa: toNumber(formData.cgpa),
     backlogs: toInteger(formData.backlogs),
     coding_skills: toNumber(formData.codingSkills),
@@ -737,17 +761,18 @@ export async function requestSalaryPrediction(payload) {
   let response;
 
   try {
-    response = await fetch(`${API_BASE_URL}/api/salary-predict`, {
+    response = await authenticatedFetch(`${API_BASE_URL}/api/salary-predict`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the salary prediction service. Please make sure the backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -757,7 +782,8 @@ export async function requestSalaryPrediction(payload) {
       try {
         const body = await response.json();
         detail = body?.detail ?? null;
-      } catch {
+      } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
         // Body could not be parsed; fall back to the generic message below.
       }
 
@@ -785,17 +811,19 @@ export async function requestSalaryPrediction(payload) {
 
   try {
     data = await response.json();
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "The salary prediction service returned an unexpected response. Please try again."
-    );
+    , { cause });
   }
 
   /* Malformed 200: validate the required value instead of displaying
      undefined/NaN or substituting an invented salary. */
-  const salaryValue = toNumber(data?.predicted_salary_lpa);
+  const salaryValue = data?.predicted_salary_lpa;
 
-  if (!Number.isFinite(salaryValue)) {
+  if (typeof salaryValue !== 'number' || !Number.isFinite(salaryValue) || salaryValue < 0 ||
+      typeof data?.model_version !== 'string' || !data.model_version.trim()) {
     throw new Error(
       "The salary prediction service returned an unexpected response. Please try again."
     );
@@ -803,8 +831,7 @@ export async function requestSalaryPrediction(payload) {
 
   return {
     predictedSalaryLpa: salaryValue,
-    modelVersion:
-      typeof data.model_version === "string" ? data.model_version : null,
+    modelVersion: data.model_version,
   };
 }
 
@@ -966,7 +993,36 @@ function validateDraftFromResumeResponse(data) {
     feature_availability: Array.isArray(data.feature_availability)
       ? data.feature_availability
       : [],
+    diagnostics: data.diagnostics ?? {},
+    extraction_summary: data.extraction_summary ?? {},
   };
+}
+
+/** Analyze a re-upload without creating, selecting or modifying a profile. */
+export async function analyzeResumeForReview(file, profile) {
+  if (!profile?.profile_id || !Number.isInteger(profile.revision) || profile.revision < 1) {
+    throw new Error('Reload your profile before uploading a resume.');
+  }
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('revision', String(profile.revision));
+  let response;
+  try {
+    response = await authenticatedFetch(`${API_BASE_URL}/api/profile/${encodeURIComponent(profile.profile_id)}/resume-preview`, { method: 'POST', body: formData });
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error('Cannot reach the resume service. Please make sure the backend is running.', { cause });
+  }
+  let data;
+  try { data = await response.json(); }
+  catch { throw new Error('The resume service returned an unexpected response. Please try again.'); }
+  if (!response.ok) throw Object.assign(new Error(response.status === 409
+    ? 'Profile changed. Reload it and upload the resume again.'
+    : typeof data.detail === 'string' ? data.detail : formatValidationError(data.detail)), { status: response.status });
+  if (data.profile?.profile_id !== profile.profile_id || data.profile?.revision !== profile.revision) {
+    throw new Error('The resume service returned an unexpected response. Please try again.');
+  }
+  return validateDraftFromResumeResponse(data);
 }
 
 /**
@@ -991,21 +1047,23 @@ function validateDraftFromResumeResponse(data) {
  * missing until the student explicitly provides them.
  * Throws an Error with a user-readable message on any failure.
  */
-export async function createProfileFromResume(file) {
+export async function createProfileFromResume(file, requestId) {
   const formData = new FormData();
   formData.append("file", file); // field name matches the backend schema
 
   let response;
 
   try {
-    response = await fetch(`${API_BASE_URL}/api/profile/from-resume`, {
+    response = await authenticatedFetch(`${API_BASE_URL}/api/profile/from-resume`, {
       method: "POST",
       body: formData, // fetch sets multipart boundary; no manual Content-Type
+      ...(requestId ? { headers: { 'Idempotency-Key': requestId } } : {}),
     });
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the resume service. Please make sure the backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -1014,7 +1072,8 @@ export async function createProfileFromResume(file) {
     try {
       const body = await response.json();
       detail = body?.detail ?? null;
-    } catch {
+    } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
       // Body could not be parsed; fall back to generic messages below.
     }
 
@@ -1041,10 +1100,11 @@ export async function createProfileFromResume(file) {
 
   try {
     data = await response.json();
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "The resume service returned an unexpected response. Please try again."
-    );
+    , { cause });
   }
 
   return validateDraftFromResumeResponse(data);
@@ -1062,7 +1122,7 @@ export async function createProfileFromResume(file) {
  * that was reviewed. No new values are invented here.
  * Throws an Error with a user-readable message on any failure.
  */
-export async function verifyStudentProfile(profileBody) {
+export async function verifyStudentProfile(profileBody, requestId) {
   if (!profileBody || typeof profileBody !== "object") {
     throw new Error(
       "The reviewed profile is missing. Please upload your resume again before verifying."
@@ -1072,17 +1132,19 @@ export async function verifyStudentProfile(profileBody) {
   let response;
 
   try {
-    response = await fetch(`${API_BASE_URL}/api/profile/verify`, {
+    response = await authenticatedFetch(`${API_BASE_URL}/api/profile/verify`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(profileBody),
+      ...(requestId ? { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId } } : {}),
     });
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the profile service. Please make sure the backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -1091,7 +1153,8 @@ export async function verifyStudentProfile(profileBody) {
     try {
       const body = await response.json();
       detail = body?.detail ?? null;
-    } catch {
+    } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
       // Body could not be parsed; fall back to generic messages below.
     }
 
@@ -1101,6 +1164,12 @@ export async function verifyStudentProfile(profileBody) {
           ? detail
           : "The profile could not be verified. Please check the details and try again."
       );
+    }
+
+    if (response.status === 409) {
+      const error = new Error('Profile changed since it was loaded. Reload it and review the latest values before confirming.');
+      error.status = 409;
+      throw error;
     }
 
     if (response.status === 404) {
@@ -1120,10 +1189,11 @@ export async function verifyStudentProfile(profileBody) {
 
   try {
     data = await response.json();
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "The profile service returned an unexpected response. Please try again."
-    );
+    , { cause });
   }
 
   if (!data?.profile || typeof data.completion !== "object") {
@@ -1163,217 +1233,209 @@ export async function predictPlacement(formData) {
   return normalizePredictionResponse(data);
 }
 
+
+/* ================================================================
+   EXPERIMENTAL V1 PLACEMENT PREDICTION
+   ================================================================ */
+
+async function requestExperimentalV1(payload) {
+  let response;
+
+  try {
+    response = await authenticatedFetch(
+      `${API_BASE_URL}/api/experimental/v1/predict`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error(
+      "Cannot reach the experimental V1 prediction service. Please make sure the backend is running.",
+      { cause }
+    );
+  }
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw Object.assign(new Error(
+        response.status === 401
+          ? "Your session has expired. Sign in again."
+          : "Security check failed. Refresh the session and try again."
+      ), { status: response.status });
+    }
+
+    if (response.status === 422) {
+      let detail = null;
+      try {
+        const body = await response.json();
+        detail = body?.detail ?? null;
+      } catch {
+        // Use the fallback validation message.
+      }
+      throw new Error(formatValidationError(detail));
+    }
+
+    throw new Error(
+      `Experimental V1 prediction failed (HTTP ${response.status}). Please try again.`
+    );
+  }
+
+  return response.json();
+}
+
+function normalizeExperimentalV1Response(data) {
+  const probability = data?.placement_probability;
+  const confidence = data?.confidence;
+
+  if (
+    typeof probability !== "number" ||
+    !Number.isFinite(probability) ||
+    probability < 0 ||
+    probability > 1 ||
+    typeof confidence !== "number" ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1 ||
+    !["Placed", "Not Placed"].includes(data?.prediction) ||
+    typeof data?.model_version !== "string" ||
+    !data.model_version.trim() ||
+    data?.experimental !== true ||
+    typeof data?.synthetic_data_notice !== "string" ||
+    !data.synthetic_data_notice.trim()
+  ) {
+    throw new Error(
+      "The experimental V1 service returned an invalid response. Please try again."
+    );
+  }
+
+  return {
+    probability: Math.round(probability * 100),
+    status: data.prediction === "Placed" ? "LIKELY PLACED" : "PLACEMENT RISK",
+    confidence: Math.round(confidence * 100),
+    modelVersion: data.model_version,
+    experimental: data.experimental,
+    syntheticDataNotice: data.synthetic_data_notice,
+  };
+}
+
+export async function predictExperimentalV1(formData) {
+  const payload = buildExperimentalV1Payload(formData);
+  const data = await requestExperimentalV1(payload);
+  return normalizeExperimentalV1Response(data);
+}
 /* ================================================================
    MOCK TEST ASSESSMENT (Phase 6B)
    ================================================================ */
 
 /**
- * Start a new mock-test assessment.
- *
- * POST /api/assessment/start with { profile_id, skill, num_questions }.
- * The backend selects the questions and returns the created assessment;
- * that response is authoritative and is returned as-is — no questions,
- * answers, or scores are invented here.
- * Throws an Error with a user-readable message on any failure.
+ * Assessment requests retain HTTP status and retry metadata so callers can
+ * distinguish expiry, duplicate completion, cooldown and uncertain delivery.
  */
-export async function startAssessment(profileId, skill, numQuestions) {
+async function assessmentRequest(path, options, fallbackMessage) {
   let response;
-
   try {
-    response = await fetch(`${API_BASE_URL}/api/assessment/start`, {
+    response = await authenticatedFetch(API_BASE_URL + path, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000),
+      ...options,
+    });
+  } catch (cause) {
+    const error = new Error(
+      cause?.name === "TimeoutError"
+        ? "The assessment request timed out. Check its status before trying again."
+        : "Cannot reach the assessment service. Please check your connection and try again."
+    , { cause });
+    error.status = null;
+    throw error;
+  }
+
+  let body = null;
+  try {
+    body = await response.json();
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    // A failed/malformed response still carries its HTTP status.
+  }
+
+  if (!response.ok) {
+    const detail = body?.detail;
+    const message =
+      response.status === 422 && Array.isArray(detail)
+        ? formatValidationError(detail)
+        : typeof detail === "string" && detail.trim()
+          ? detail
+          : response.status === 410
+            ? "This assessment has expired. Late answers cannot be scored."
+            : response.status === 409
+              ? "This assessment has already been submitted. Checking the saved result."
+              : fallbackMessage;
+    const error = new Error(message);
+    error.status = response.status;
+    const bodySeconds = Number(body?.retry_after_seconds);
+    const headerSeconds = Number(response.headers.get("Retry-After"));
+    error.retryAfterSeconds =
+      Number.isFinite(bodySeconds) && bodySeconds > 0
+        ? bodySeconds
+        : Number.isFinite(headerSeconds) && headerSeconds > 0
+          ? headerSeconds
+          : null;
+    error.nextAllowedAt =
+      typeof body?.next_allowed_at === "string" ? body.next_allowed_at : null;
+    throw error;
+  }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    const error = new Error(
+      "The assessment service returned an unexpected response. Check the assessment status."
+    );
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+
+/** Start a server-selected session. No score or deadline is invented here. */
+export async function startAssessment(profileId, skill, numQuestions, requestId) {
+  return assessmentRequest(
+    "/api/assessment/start",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         profile_id: profileId,
-        skill: skill,
+        skill,
         num_questions: numQuestions,
       }),
-    });
-  } catch {
-    throw new Error(
-      "Cannot reach the assessment service. Please make sure the FastAPI backend is running."
-    );
-  }
-
-  if (!response.ok) {
-    if (response.status === 422) {
-      let detail = null;
-
-      try {
-        const body = await response.json();
-        detail = body?.detail ?? null;
-      } catch {
-        // Body could not be parsed; fall back to the generic message below.
-      }
-
-      throw new Error(formatValidationError(detail));
-    }
-
-    if (response.status === 404) {
-      throw new Error(
-        "Could not start the assessment: the profile or skill was not found."
-      );
-    }
-
-    if (response.status === 429) {
-      // Cooldown/attempt-limit: surface the backend's own detail message
-      // (e.g. "Please wait before retrying Python. Next attempt allowed
-      // after ...") instead of a generic retry error. No local cooldown
-      // calculation — the backend is authoritative.
-      let rateDetail = null;
-
-      try {
-        const body = await response.json();
-        rateDetail = body?.detail ?? null;
-      } catch {
-        // Body could not be parsed; fall back to the generic message below.
-      }
-
-      throw new Error(
-        typeof rateDetail === "string" && rateDetail.trim() !== ""
-          ? rateDetail
-          : "Unable to start the assessment. Please try again."
-      );
-    }
-
-    throw new Error("Unable to start the assessment. Please try again.");
-  }
-
-  let data;
-
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error("Unable to start the assessment. Please try again.");
-  }
-
-  /* Malformed 200: require a JSON object instead of substituting an
-     invented assessment; deeper shape checks belong to the consumer. */
-  if (!data || typeof data !== "object") {
-    throw new Error(
-      "The assessment service returned an unexpected response. Please try again."
-    );
-  }
-
-  return data;
+      ...(requestId ? { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId } } : {}),
+    },
+    "Unable to start the assessment. Please try again."
+  );
 }
 
-/**
- * Submit a student's answers for an assessment.
- *
- * POST /api/assessment/{assessmentId}/submit with { profile_id, answers }.
- * The backend grades the submission and returns the result; that response
- * is authoritative and is returned as-is — nothing is scored here.
- * Throws an Error with a user-readable message on any failure.
- */
-export async function submitAssessment(assessmentId, profileId, answers) {
-  let response;
-
-  try {
-    response = await fetch(
-      `${API_BASE_URL}/api/assessment/${encodeURIComponent(
-        assessmentId
-      )}/submit`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          profile_id: profileId,
-          answers: answers,
-        }),
-      }
-    );
-  } catch {
-    throw new Error(
-      "Cannot reach the assessment service. Please make sure the FastAPI backend is running."
-    );
-  }
-
-  if (!response.ok) {
-    if (response.status === 422) {
-      let detail = null;
-
-      try {
-        const body = await response.json();
-        detail = body?.detail ?? null;
-      } catch {
-        // Body could not be parsed; fall back to the generic message below.
-      }
-
-      throw new Error(formatValidationError(detail));
-    }
-
-    if (response.status === 404) {
-      throw new Error("Assessment was not found.");
-    }
-
-    throw new Error("Unable to submit the assessment. Please try again.");
-  }
-
-  let data;
-
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error("Unable to submit the assessment. Please try again.");
-  }
-
-  if (!data || typeof data !== "object") {
-    throw new Error(
-      "The assessment service returned an unexpected response. Please try again."
-    );
-  }
-
-  return data;
+/** Submit answer text; the backend owns scoring and submission policy. */
+export async function submitAssessment(assessmentId, profileId, answers, requestId) {
+  return assessmentRequest(
+    "/api/assessment/" + encodeURIComponent(assessmentId) + "/submit",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile_id: profileId, answers }),
+      ...(requestId ? { headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId } } : {}),
+    },
+    "Unable to submit the assessment. Please try again."
+  );
 }
 
-/**
- * Fetch a previously started assessment (questions + current state).
- *
- * GET /api/assessment/{assessmentId}
- * The response is authoritative and is returned as-is.
- * Throws an Error with a user-readable message on any failure.
- */
+/** Reload authoritative timing/status and, after completion, the public result. */
 export async function fetchAssessment(assessmentId) {
-  let response;
-
-  try {
-    response = await fetch(
-      `${API_BASE_URL}/api/assessment/${encodeURIComponent(assessmentId)}`
-    );
-  } catch {
-    throw new Error(
-      "Cannot reach the assessment service. Please make sure the FastAPI backend is running."
-    );
-  }
-
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error("Assessment was not found.");
-    }
-
-    throw new Error("Unable to load the assessment. Please try again.");
-  }
-
-  let data;
-
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error("Unable to load the assessment. Please try again.");
-  }
-
-  if (!data || typeof data !== "object") {
-    throw new Error(
-      "The assessment service returned an unexpected response. Please try again."
-    );
-  }
-
-  return data;
+  return assessmentRequest(
+    "/api/assessment/" + encodeURIComponent(assessmentId),
+    {},
+    "Unable to load the assessment. Please try again."
+  );
 }
 
 /**
@@ -1388,13 +1450,14 @@ export async function fetchAssessmentHistory(profileId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/assessments`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the assessment history service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -1409,8 +1472,9 @@ export async function fetchAssessmentHistory(profileId) {
 
   try {
     data = await response.json();
-  } catch {
-    throw new Error("Unable to load assessment history. Please try again.");
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error("Unable to load assessment history. Please try again.", { cause });
   }
 
   if (!data || typeof data !== "object") {
@@ -1434,13 +1498,14 @@ export async function fetchSkillsView(profileId) {
   let response;
 
   try {
-    response = await fetch(
+    response = await authenticatedFetch(
       `${API_BASE_URL}/api/profile/${encodeURIComponent(profileId)}/skills`
     );
-  } catch {
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
     throw new Error(
       "Cannot reach the skills service. Please make sure the FastAPI backend is running."
-    );
+    , { cause });
   }
 
   if (!response.ok) {
@@ -1455,8 +1520,9 @@ export async function fetchSkillsView(profileId) {
 
   try {
     data = await response.json();
-  } catch {
-    throw new Error("Unable to load the skills view. Please try again.");
+  } catch (cause) {
+    if (cause?.status === 401 || cause?.status === 403) throw cause;
+    throw new Error("Unable to load the skills view. Please try again.", { cause });
   }
 
   if (!data || typeof data !== "object") {

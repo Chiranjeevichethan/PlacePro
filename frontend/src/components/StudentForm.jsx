@@ -8,19 +8,20 @@ import { initialFormData } from "../data/formDefaults";
  * the training-distribution ranges below; count fields accept any
  * non-negative integer (no upper limit).
  *
- * codingSkill / communicationSkill keep the existing 0–100 UI scale;
- * the API service converts them to the model's 0–10 scale.
+ * codingSkill / communicationSkill use the model's own 1–10 scale and are
+ * sent unchanged (the backend schema accepts 0–10, the model was trained
+ * on 1–10).
  */
 const RANGES = {
   cgpa: { min: 4, max: 10, step: 0.01, label: "CGPA" },
   backlogs: { min: 0, max: null, step: 1, label: "Backlogs" },
-  codingSkill: { min: 0, max: 100, step: 1, label: "Coding Skill" },
+  codingSkill: { min: 1, max: 10, step: 0.1, label: "Coding Skill" },
   dsaScore: { min: 1, max: 10, step: 0.1, label: "DSA Score" },
   aptitudeScore: { min: 20, max: 100, step: 1, label: "Aptitude Score" },
   communicationSkill: {
-    min: 0,
-    max: 100,
-    step: 1,
+    min: 1,
+    max: 10,
+    step: 0.1,
     label: "Communication Skill",
   },
   mlKnowledge: { min: 0, max: 10, step: 0.1, label: "ML Knowledge" },
@@ -67,14 +68,21 @@ const formSections = [
         name: "branch",
         label: "Branch",
         type: "select",
+        /* Canonical backend vocabulary (src/pipeline branch categories).
+           The ISE label stays human-readable; services/api.js applies the
+           existing ISE -> CSE mapping before the payload is sent. */
         options: [
-          "Information Science",
-          "Computer Science",
-          "Information Technology",
-          "Electronics",
-          "Electrical",
-          "Mechanical",
-          "Civil",
+          { value: "CSE", label: "Computer Science & Engineering" },
+          {
+            value: "ISE",
+            label: "Information Science and Engineering (ISE)",
+          },
+          { value: "IT", label: "Information Technology" },
+          { value: "ECE", label: "Electronics & Communication" },
+          { value: "EE", label: "Electrical Engineering" },
+          { value: "ME", label: "Mechanical Engineering" },
+          { value: "CE", label: "Civil Engineering" },
+          { value: "Chemical", label: "Chemical Engineering" },
         ],
         placeholder: "Select Branch",
       },
@@ -82,10 +90,11 @@ const formSections = [
         name: "collegeTier",
         label: "College Tier",
         type: "select",
+        /* Exact backend vocabulary (Tier-1 / Tier-2 / Tier-3). */
         options: [
-          { value: "1", label: "Tier 1" },
-          { value: "2", label: "Tier 2" },
-          { value: "3", label: "Tier 3" },
+          { value: "Tier-1", label: "Tier 1" },
+          { value: "Tier-2", label: "Tier 2" },
+          { value: "Tier-3", label: "Tier 3" },
         ],
         placeholder: "Select Tier",
       },
@@ -106,9 +115,10 @@ const formSections = [
     fields: [
       {
         name: "codingSkill",
-        label: "Coding Skill (0 - 100)",
+        label: "Coding Skill (1 - 10)",
         type: "number",
-        placeholder: "0 - 100",
+        placeholder: "1 - 10",
+        step: "0.1",
       },
       {
         name: "dsaScore",
@@ -155,9 +165,10 @@ const formSections = [
       },
       {
         name: "communicationSkill",
-        label: "Communication Skill (0 - 100)",
+        label: "Communication Skill (1 - 10)",
         type: "number",
-        placeholder: "0 - 100",
+        placeholder: "1 - 10",
+        step: "0.1",
       },
     ],
   },

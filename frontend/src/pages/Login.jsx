@@ -1,12 +1,11 @@
 import { useState } from "react";
 import Logo from "../components/Logo";
-import { login, socialLogin } from "../services/auth";
+import DemoCredentials from "../components/DemoCredentials";
+import { login, register, startGoogleLogin, consumeAuthReturn } from "../services/auth";
+import { readLoginEmail, rememberLoginEmail } from "../services/loginEmailDraft.js";
 
 const FORGOT_MESSAGE =
-  "Password recovery will be available when backend authentication is connected.";
-
-const CREATE_MESSAGE =
-  "Account registration will be available when backend authentication is connected.";
+  "Password recovery is unavailable until an approved email workflow is connected.";
 
 function UserIcon() {
   return (
@@ -117,28 +116,6 @@ function GoogleIcon() {
   );
 }
 
-function GitHubIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.73.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.67.8.56A10.52 10.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z" />
-    </svg>
-  );
-}
-
-function LinkedInIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.72v20.55C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.72C24 .77 23.2 0 22.22 0z" />
-    </svg>
-  );
-}
-
-const SOCIAL_PROVIDERS = [
-  { name: "Google", Icon: GoogleIcon },
-  { name: "GitHub", Icon: GitHubIcon },
-  { name: "LinkedIn", Icon: LinkedInIcon },
-];
-
 function LoginBackground() {
   return (
     <>
@@ -175,40 +152,61 @@ function LoginBackground() {
   );
 }
 
-function Login({ onLogin }) {
-  const [username, setUsername] = useState("");
+function Login({ onLogin, notice: initialNotice, initialError = "" }) {
+  const [returned] = useState(() => consumeAuthReturn());
+  const [username, setUsername] = useState(readLoginEmail);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(true);
-  const [error, setError] = useState("");
-  const [note, setNote] = useState("");
+  const [registering, setRegistering] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
+  const [error, setError] = useState(initialError || returned?.error || "");
+  const [note, setNote] = useState(returned?.error ? "" : initialNotice || "");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const busy = loading || googleLoading;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (loading) return;
+    if (busy) return;
 
     setError("");
     setNote("");
     setLoading(true);
 
     try {
-      const ok = await login(username, password, remember);
+      if (registering) {
+        if (password !== confirmation) throw new Error('The passwords do not match.');
+        setNote(await register(username, password));
+        setPassword(''); setConfirmation('');
+        return;
+      }
+      const ok = await login(username, password);
 
       if (ok) {
-        onLogin();
+        setUsername(''); setPassword(''); onLogin?.();
       } else {
-        setError("Invalid username or password.");
+        setError("Invalid email or password.");
       }
+    } catch (error) {
+      setError(error.message || 'Unable to sign in. Please retry.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSocial = async (name) => {
-    const message = await socialLogin(name);
-    setNote(message);
+  const handleGoogle = async () => {
+    if (busy) return;
+    setError("");
+    setNote("");
+    setGoogleLoading(true);
+    try {
+      await startGoogleLogin();
+    } catch (error) {
+      setError(error.message || 'Google sign-in is unavailable. Please retry.');
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -220,15 +218,16 @@ function Login({ onLogin }) {
           <Logo variant="stacked" size={72} />
         </div>
 
-        <h1 className="login-title">Welcome Back</h1>
+        <h1 className="login-title">{registering ? 'Create your account' : 'Welcome Back'}</h1>
 
         <p className="login-subtitle">
-          Sign in to continue to your placement dashboard.
+          {registering ? 'Student registration is pending an approved email activation workflow.' : 'Sign in to continue to your placement dashboard.'}
         </p>
 
-        <form className="login-form" onSubmit={handleSubmit} noValidate>
+        {(note || initialNotice) && !error && <div className="login-note" role="status">{note || initialNotice}</div>}
+        <form className="login-form" onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="login-username">Email / Username</label>
+            <label htmlFor="login-username">Student email</label>
 
             <div className="input-wrap">
               <span className="input-icon" aria-hidden="true">
@@ -237,9 +236,15 @@ function Login({ onLogin }) {
 
               <input
                 id="login-username"
-                type="text"
+                type="email"
+                required
+                maxLength={254}
+                disabled={busy}
                 value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  rememberLoginEmail(event.target.value);
+                }}
                 placeholder="student@placepro.com"
                 autoComplete="username"
                 autoFocus
@@ -261,7 +266,11 @@ function Login({ onLogin }) {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Enter your password"
-                autoComplete="current-password"
+                autoComplete={registering ? 'new-password' : 'current-password'}
+                required
+                minLength={registering ? 12 : undefined}
+                maxLength={128}
+                disabled={busy}
                 className="has-toggle"
               />
 
@@ -270,22 +279,20 @@ function Login({ onLogin }) {
                 className="input-toggle"
                 onClick={() => setShowPassword((prev) => !prev)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
               >
                 {showPassword ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
           </div>
 
+          {registering && <div className="form-group">
+            <label htmlFor="register-confirmation">Confirm password</label>
+            <input id="register-confirmation" type="password" value={confirmation} required disabled={busy}
+              autoComplete="new-password" onChange={(event) => setConfirmation(event.target.value)} />
+            <small>Use 12–128 characters. Passwords are never saved in browser storage.</small>
+          </div>}
           <div className="login-options">
-            <label className="login-remember">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(event) => setRemember(event.target.checked)}
-              />
-              <span>Remember me</span>
-            </label>
-
             <button
               type="button"
               className="login-forgot"
@@ -297,43 +304,38 @@ function Login({ onLogin }) {
 
           {error && <div className="login-error" role="alert">{error}</div>}
 
-          <button type="submit" className="login-button" disabled={loading}>
-            {loading ? "Signing you in..." : "LOGIN"}
+          <button type="submit" className="login-button" disabled={busy}>
+            {loading ? (registering ? 'Submitting…' : 'Signing you in...') : (registering ? 'Request registration' : 'LOGIN')}
           </button>
         </form>
+
+        {!registering && <DemoCredentials disabled={busy} />}
 
         <div className="login-divider">
           <span>OR</span>
         </div>
 
         <div className="social-login">
-          {SOCIAL_PROVIDERS.map(({ name, Icon }) => (
-            <button
-              key={name}
-              type="button"
-              className="social-login-btn"
-              onClick={() => handleSocial(name)}
-            >
-              <Icon />
-              <span>Continue with {name}</span>
-            </button>
-          ))}
+          <button
+            type="button"
+            className="social-login-btn"
+            onClick={handleGoogle}
+            disabled={busy}
+          >
+            <GoogleIcon />
+            <span>{googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}</span>
+          </button>
         </div>
 
-        {note && (
-          <p className="login-note" role="status">
-            {note}
-          </p>
-        )}
-
         <p className="login-create">
-          Don't have an account?{" "}
+          New student?{" "}
           <button
             type="button"
             className="login-link-inline"
-            onClick={() => setNote(CREATE_MESSAGE)}
+            disabled={busy}
+            onClick={() => { setRegistering((value) => !value); setError(''); setNote(''); setPassword(''); setConfirmation(''); }}
           >
-            Create Account
+            {registering ? 'Back to login' : 'Student registration'}
           </button>
         </p>
 
@@ -343,8 +345,7 @@ function Login({ onLogin }) {
           </span>
 
           <span>
-            Account registration will be available when backend authentication
-            is connected.
+            Email and Google sign-in use the same secure server session. Only verified accounts can sign in.
           </span>
         </div>
       </div>

@@ -1,27 +1,24 @@
-import { useEffect, useState } from "react";
 import IconMark from "../components/IconMark";
 import SkillChip from "../components/SkillChip";
-import { fetchPerformance, fetchStudentProfile } from "../services/api";
+import { fetchPerformance } from "../services/api";
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { useProfileResource } from '../hooks/useProfileResource';
 import {
-  DEMO_PROFILE_ID,
-  flattenBackendProfile,
-} from "../services/profileConfig";
+  displayCountOrNull,
+  displayIntegerOrNull,
+  displayPercentOrNull,
+  displayNumberOrNull,
+} from "../services/performanceDisplay.js";
 
 /* ------------------------------------------------------------------ */
 /* Defensive readers (backend fields may be missing/null/empty).       */
 /* ------------------------------------------------------------------ */
 
 /** 0-1 probability -> rounded percentage for display only. Null-safe. */
-const probToPercent = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
-};
+const probToPercent = (value) => displayPercentOrNull(value, 100);
 
 /** Already-percentage value -> rounded, null-safe. */
-const pctValue = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.round(parsed) : null;
-};
+const pctValue = displayPercentOrNull;
 
 const formatDate = (timestamp) => {
   if (typeof timestamp !== "string" || timestamp.length === 0) return "";
@@ -76,57 +73,64 @@ function HistoryChart({ points, ariaLabel, unit = "%" }) {
   const linePoints = points.map((p, i) => `${x(i)},${y(p.value)}`).join(" ");
 
   return (
-    <svg
-      className="trend-chart"
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label={ariaLabel}
+    <div
+      className="trend-chart-scroll"
+      role="region"
+      aria-label="Scrollable performance trend chart"
+      tabIndex={0}
     >
-      <defs>
-        <linearGradient id="analysisTrendArea" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#2563eb" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
-        </linearGradient>
-      </defs>
+      <svg
+        className="trend-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={ariaLabel}
+      >
+        <defs>
+          <linearGradient id="analysisTrendArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
+          </linearGradient>
+        </defs>
 
-      <line
-        x1={padX}
-        y1={height - padY}
-        x2={width - padX}
-        y2={height - padY}
-        className="chart-grid-line"
-      />
+        <line
+          x1={padX}
+          y1={height - padY}
+          x2={width - padX}
+          y2={height - padY}
+          className="chart-grid-line"
+        />
 
-      {points.length > 1 && (
-        <>
-          <polygon
-            points={`${padX},${height - padY} ${linePoints} ${width - padX},${
-              height - padY
-            }`}
-            fill="url(#analysisTrendArea)"
-          />
-          <polyline points={linePoints} className="chart-line" fill="none" />
-        </>
-      )}
+        {points.length > 1 && (
+          <>
+            <polygon
+              points={`${padX},${height - padY} ${linePoints} ${width - padX},${
+                height - padY
+              }`}
+              fill="url(#analysisTrendArea)"
+            />
+            <polyline points={linePoints} className="chart-line" fill="none" />
+          </>
+        )}
 
-      {points.map((point, i) => (
-        <g key={`${point.label}-${i}`}>
-          <circle cx={x(i)} cy={y(point.value)} r="4" className="chart-dot" />
-          <text x={x(i)} y={height - 5} textAnchor="middle" className="chart-label">
-            {point.label}
-          </text>
-          <text
-            x={x(i)}
-            y={y(point.value) - 9}
-            textAnchor="middle"
-            className="chart-value"
-          >
-            {point.value}
-            {unit}
-          </text>
-        </g>
-      ))}
-    </svg>
+        {points.map((point, i) => (
+          <g key={`${point.label}-${i}`}>
+            <circle cx={x(i)} cy={y(point.value)} r="4" className="chart-dot" />
+            <text x={x(i)} y={height - 5} textAnchor="middle" className="chart-label">
+              {point.label}
+            </text>
+            <text
+              x={x(i)}
+              y={y(point.value) - 9}
+              textAnchor="middle"
+              className="chart-value"
+            >
+              {point.value}
+              {unit}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -162,60 +166,13 @@ function ErrorState({ message, onRetry }) {
 /* ------------------------------------------------------------------ */
 
 function PerformanceAnalysis() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { profile } = useStudentProfileContext();
+  const { data, error, loading, refetch: handleRetry } = useProfileResource(fetchPerformance);
 
   /* Performance covers readiness + histories + skills. The profile is
      fetched once for the real activity counts (internships/projects/
      certifications/hackathons/backlogs), which the performance response
      does not contain (its breakdown values are points, not counts). */
-  const fetchAll = () =>
-    Promise.all([
-      fetchPerformance(DEMO_PROFILE_ID),
-      fetchStudentProfile(DEMO_PROFILE_ID),
-    ]);
-
-  useEffect(() => {
-    let active = true;
-
-    fetchAll()
-      .then(([performance, profileRes]) => {
-        if (!active) return;
-        setData({ performance, profileRes });
-        setError(null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setError(
-          err?.message ?? "Unable to load performance data. Please try again."
-        );
-        setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const handleRetry = () => {
-    setLoading(true);
-    setError(null);
-
-    fetchAll()
-      .then(([performance, profileRes]) => {
-        setData({ performance, profileRes });
-        setError(null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(
-          err?.message ?? "Unable to load performance data. Please try again."
-        );
-        setLoading(false);
-      });
-  };
 
   if (loading) {
     return (
@@ -247,12 +204,12 @@ function PerformanceAnalysis() {
     );
   }
 
-  const performance = data.performance ?? {};
-  const profile = flattenBackendProfile(data.profileRes?.profile);
+  const performance = data ?? {};
 
-  /* Live backend nests the summary: summary.predictions / summary.assessments.
-     Merged defensively so a flat shape would also work. */
+  /* Keep independent history timestamps separate, including nulls. */
   const rawSummary = performance.summary ?? {};
+  const predictionSummary = rawSummary.predictions ?? rawSummary;
+  const assessmentSummary = rawSummary.assessments ?? rawSummary;
   const summary = {
     ...(rawSummary.predictions ?? {}),
     ...(rawSummary.assessments ?? {}),
@@ -272,13 +229,11 @@ function PerformanceAnalysis() {
   const improvementPlan = asArray(readiness.improvement_plan);
 
   /* --- Prediction performance (real values; nulls stay null) --- */
-  const predictionsCount = Number.isFinite(Number(summary.predictions_count))
-    ? Number(summary.predictions_count)
-    : 0;
+  const predictionsCount = displayCountOrNull(summary.predictions_count);
   const latestProbability = probToPercent(summary.latest_probability);
   const highestProbability = probToPercent(summary.highest_probability);
   const lowestProbability = probToPercent(summary.lowest_probability);
-  const latestPredictionTimestamp = formatDate(summary.latest_timestamp);
+  const latestPredictionTimestamp = formatDate(predictionSummary.latest_timestamp);
   const latestModelVersion =
     predictionHistory.length > 0
       ? predictionHistory[predictionHistory.length - 1]?.model_version ?? null
@@ -293,17 +248,13 @@ function PerformanceAnalysis() {
     .slice(-6);
 
   /* --- Assessment performance (real values; nulls stay null) --- */
-  const assessmentsCount = Number.isFinite(Number(summary.assessments_count))
-    ? Number(summary.assessments_count)
-    : 0;
+  const assessmentsCount = displayCountOrNull(summary.assessments_count);
   const averageScore = pctValue(summary.average_score);
-  const skillsAssessed = Number.isFinite(Number(summary.skills_assessed))
-    ? Number(summary.skills_assessed)
-    : 0;
+  const skillsAssessed = displayCountOrNull(summary.skills_assessed);
   const latestSkill = summary.latest_skill ?? null;
   const latestScore = pctValue(summary.latest_score);
   const latestLevel = summary.latest_level ?? null;
-  const latestAssessmentTimestamp = formatDate(summary.latest_timestamp);
+  const latestAssessmentTimestamp = formatDate(assessmentSummary.latest_timestamp);
 
   const assessmentPoints = assessmentHistory
     .map((entry) => ({
@@ -419,9 +370,7 @@ function PerformanceAnalysis() {
 
         <div className="bar-list">
           {Object.entries(BREAKDOWN_LABELS).map(([key, label]) => {
-            const points = Number.isFinite(Number(breakdown[key]))
-              ? Number(breakdown[key])
-              : null;
+            const points = displayNumberOrNull(breakdown[key]);
             return (
               <div key={key} className="bar-row-header">
                 <span>{label}</span>
@@ -477,10 +426,19 @@ function PerformanceAnalysis() {
           <IconMark name="prediction" className="section-title-icon" />
           <span>Prediction Performance</span>
         </h2>
+        <p className="prediction-data-note">
+          Recorded predictions are historical. {summary.latest_is_current === false
+            ? 'The latest recorded prediction used an earlier profile revision.'
+            : summary.latest_is_current === null
+              ? 'The source revision of the latest legacy prediction is unknown.'
+              : 'Current readiness and skills are calculated separately below.'}
+        </p>
 
         <div className="activity-grid">
           <div className="activity-card">
-            <span className="activity-value">{predictionsCount}</span>
+            <span className="activity-value">
+              {predictionsCount === null ? "Not available" : predictionsCount}
+            </span>
             <span className="activity-label">Predictions made</span>
           </div>
           <div className="activity-card">
@@ -572,7 +530,9 @@ function PerformanceAnalysis() {
 
         <div className="activity-grid">
           <div className="activity-card">
-            <span className="activity-value">{assessmentsCount}</span>
+            <span className="activity-value">
+              {assessmentsCount === null ? "Not available" : assessmentsCount}
+            </span>
             <span className="activity-label">Assessments taken</span>
           </div>
           <div className="activity-card">
@@ -582,7 +542,9 @@ function PerformanceAnalysis() {
             <span className="activity-label">Average score</span>
           </div>
           <div className="activity-card">
-            <span className="activity-value">{skillsAssessed}</span>
+            <span className="activity-value">
+              {skillsAssessed === null ? "Not available" : skillsAssessed}
+            </span>
             <span className="activity-label">Skills assessed</span>
           </div>
           <div className="activity-card">
@@ -635,9 +597,9 @@ function PerformanceAnalysis() {
                           {score === null
                             ? "Score not available"
                             : `Score ${score}%`}
-                          {Number.isFinite(Number(entry?.attempt))
-                            ? ` · attempt ${entry.attempt}`
-                            : ""}
+                          {displayIntegerOrNull(entry?.attempt) === null
+                            ? " · attempt not available"
+                            : ` · attempt ${displayIntegerOrNull(entry.attempt)}`}
                           {entry?.verified ? " · verified" : ""}
                           {entry?.timestamp
                             ? ` · ${formatDate(entry.timestamp)}`
@@ -722,11 +684,9 @@ function PerformanceAnalysis() {
             {improvementPlan.map((entry, index) => (
               <li key={`${entry?.skill}-${index}`}>
                 <strong>{entry?.skill ?? "Unknown skill"}</strong>
-                {Number.isFinite(Number(entry?.priority)) && (
-                  <span className="analysis-priority-chip">
-                    Priority {entry.priority}
-                  </span>
-                )}
+                <span className="analysis-priority-chip">
+                  Priority {displayIntegerOrNull(entry?.priority) ?? "not available"}
+                </span>
                 {entry?.action && <p>{entry.action}</p>}
                 {entry?.reason && (
                   <p className="skills-empty">{entry.reason}</p>

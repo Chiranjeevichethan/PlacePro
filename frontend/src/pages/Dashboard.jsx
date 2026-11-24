@@ -1,28 +1,38 @@
-import { useEffect, useState } from "react";
 import StatsCard from "../components/StatsCard";
+import { useEffect, useState } from 'react';
+import { usePredictionResult } from '../hooks/usePredictionResult';
+import { createRetryIntent } from '../services/retryIntent';
+import { saveProfilePrediction } from '../services/ownedProfiles';
 import SkillChip from "../components/SkillChip";
 import IconMark from "../components/IconMark";
+import DashboardSalaryEstimate from '../components/DashboardSalaryEstimate';
 import {
-  fetchStudentProfile,
   fetchPlacementSummary,
   fetchPerformance,
   fetchCompanyRecommendations,
 } from "../services/api";
-import { DEMO_PROFILE_ID } from "../services/profileConfig";
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { useProfileResource } from '../hooks/useProfileResource';
+import { requireSource } from '../services/profileState.js';
+import { finiteNumberOrNull, percentOrNull } from '../services/resultDisplay.js';
+
+async function loadDashboard(profileId) {
+  const [placementSummary, performance, recommendations] = await Promise.all([
+    fetchPlacementSummary(profileId), fetchPerformance(profileId), fetchCompanyRecommendations(profileId, 3),
+  ]);
+  const source = { profile_id: profileId, revision: performance.source_revision };
+  requireSource(placementSummary, source);
+  requireSource(recommendations, source);
+  return { profile_id: profileId, source_revision: performance.source_revision,
+    placementSummary, performance, recommendations };
+}
 
 /* ------------------------------------------------------------------ */
 /* Defensive readers (backend fields may be missing/null/empty)        */
 /* ------------------------------------------------------------------ */
 
-const pctOrNull = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
-};
-
-const pctValue = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.round(parsed) : null;
-};
+const pctOrNull = (value) => percentOrNull(value, 100);
+const pctValue = percentOrNull;
 
 const formatDate = (timestamp) => {
   if (typeof timestamp !== "string" || timestamp.length === 0) return "";
@@ -36,19 +46,6 @@ const formatDate = (timestamp) => {
         minute: "2-digit",
   });
 };
-
-function readProfileName() {
-  try {
-    const raw = localStorage.getItem("placepro_profile");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed?.name) return parsed.name;
-    }
-  } catch {
-    // Fall back to the backend profile name below.
-  }
-  return null;
-}
 
 /* ------------------------------------------------------------------ */
 /* Static welcome art (decorative only — carries no data)              */
@@ -160,51 +157,58 @@ function TrendChart({ history }) {
   },${height - padY}`;
 
   return (
-    <svg
-      className="trend-chart"
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label="Placement probability trend across your predictions"
+    <div
+      className="trend-chart-scroll"
+      role="region"
+      aria-label="Scrollable placement probability trend chart"
+      tabIndex={0}
     >
-      <defs>
-        <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#2563eb" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id="trendLine" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#2563eb" />
-          <stop offset="100%" stopColor="#7c3aed" />
-        </linearGradient>
-      </defs>
+      <svg
+        className="trend-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Placement probability trend across your predictions"
+      >
+        <defs>
+          <linearGradient id="trendArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="trendLine" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#2563eb" />
+            <stop offset="100%" stopColor="#7c3aed" />
+          </linearGradient>
+        </defs>
 
-      <line
-        x1={padX}
-        y1={height - padY}
-        x2={width - padX}
-        y2={height - padY}
-        className="chart-grid-line"
-      />
+        <line
+          x1={padX}
+          y1={height - padY}
+          x2={width - padX}
+          y2={height - padY}
+          className="chart-grid-line"
+        />
 
-      <polygon points={areaPoints} fill="url(#trendArea)" />
-      <polyline points={linePoints} className="chart-line" fill="none" />
+        <polygon points={areaPoints} fill="url(#trendArea)" />
+        <polyline points={linePoints} className="chart-line" fill="none" />
 
-      {points.map((point, i) => (
-        <g key={`${point.label}-${i}`}>
-          <circle cx={x(i)} cy={y(point.probability)} r="4" className="chart-dot" />
-          <text x={x(i)} y={height - 5} textAnchor="middle" className="chart-label">
-            {point.label}
-          </text>
-          <text
-            x={x(i)}
-            y={y(point.probability) - 9}
-            textAnchor="middle"
-            className="chart-value"
-          >
-            {point.probability}%
-          </text>
-        </g>
-      ))}
-    </svg>
+        {points.map((point, i) => (
+          <g key={`${point.label}-${i}`}>
+            <circle cx={x(i)} cy={y(point.probability)} r="4" className="chart-dot" />
+            <text x={x(i)} y={height - 5} textAnchor="middle" className="chart-label">
+              {point.label}
+            </text>
+            <text
+              x={x(i)}
+              y={y(point.probability) - 9}
+              textAnchor="middle"
+              className="chart-value"
+            >
+              {point.probability}%
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -244,64 +248,34 @@ function ErrorState({ message, onRetry }) {
 }
 
 function Dashboard({ onNavigate }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  /* The canonical profile (and its id) comes from the shared context — the
+     dashboard never reads the name from localStorage or from a fixed demo
+     profile. */
+  const { profile,profileId,profileKey,rawProfile,error: profileError,loading: profileLoading } = useStudentProfileContext();
+  const [retryIntent] = useState(createRetryIntent);
+  const inputs = { profileId, revision: rawProfile?.revision };
+  const savedPrediction = usePredictionResult(profileKey,inputs,
+    (input) => saveProfilePrediction(input.profileId,input.revision,retryIntent(input)));
 
-  const fetchAll = () =>
-    Promise.all([
-      fetchStudentProfile(DEMO_PROFILE_ID),
-      fetchPlacementSummary(DEMO_PROFILE_ID),
-      fetchPerformance(DEMO_PROFILE_ID),
-      fetchCompanyRecommendations(DEMO_PROFILE_ID, 3),
-    ]);
+  /* Data is tagged with the profile it belongs to: if the student changes
+     (e.g. a resume is verified), the previous student's numbers are never
+     rendered while the new ones load. */
+  const { data, loading, error: pageError, refetch: handleRetry } = useProfileResource(loadDashboard);
+  useEffect(() => { if (savedPrediction.result) handleRetry(); },[savedPrediction.result,handleRetry]);
 
-  /* Codebase convention: .then/.catch with state updates ONLY in async
-     callbacks — the effect body never calls setState synchronously.
-     Initial state is already loading=true. */
-  useEffect(() => {
-    let active = true;
+  /* Fallback name only when the profile has no usable name. */
+  const userName = profile?.name?.trim() || "Student";
 
-    fetchAll()
-      .then(([profileRes, placementSummary, performance, recommendations]) => {
-        if (!active) return;
-        setData({ profileRes, placementSummary, performance, recommendations });
-        setError(null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setError(
-          err?.message ?? "Unable to load the dashboard. Please try again."
-        );
-        setLoading(false);
-      });
+  if (!rawProfile && !profileError && !profileLoading) return <div className="dashboard">
+    <div className="dash-card"><h1>Your placement dashboard</h1>
+      <p>Create your first profile to see readiness, skill gaps and recommendations here.</p>
+      <p>After reviewing your profile, explore model estimates and take a practice assessment to build your performance history.</p>
+      <button type="button" className="dash-btn secondary" onClick={() => onNavigate('profile')}>Explore Student Profile</button>
+    </div>
+  </div>;
 
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const handleRetry = () => {
-    setLoading(true);
-    setError(null);
-
-    fetchAll()
-      .then(([profileRes, placementSummary, performance, recommendations]) => {
-        setData({ profileRes, placementSummary, performance, recommendations });
-        setError(null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(
-          err?.message ?? "Unable to load the dashboard. Please try again."
-        );
-        setLoading(false);
-      });
-  };
-
-  const userName = readProfileName() ?? "Student";
-
+  /* Derived states (no setState in the effect body): loading until this
+     profile's own data arrives, and the profile error always wins. */
   if (loading) {
     return (
       <div className="dashboard">
@@ -318,7 +292,7 @@ function Dashboard({ onNavigate }) {
     );
   }
 
-  if (error) {
+  if (pageError) {
     return (
       <div className="dashboard">
         <div className="dashboard-welcome">
@@ -329,14 +303,12 @@ function Dashboard({ onNavigate }) {
           </div>
           <WelcomeArt />
         </div>
-        <ErrorState message={error} onRetry={handleRetry} />
+        <ErrorState message={pageError} onRetry={handleRetry} />
       </div>
     );
   }
 
-  const backendProfile = data.profileRes?.profile ?? {};
-  const completion = data.profileRes?.completion ?? {};
-  const readiness = data.performance?.readiness ?? {};
+  const readiness = data?.performance?.readiness ?? {};
   /* Live backend nests summary under `predictions` and `assessments`.
      Support both the nested shape and a flat shape defensively. */
   const rawSummary = data.performance?.summary ?? {};
@@ -348,15 +320,11 @@ function Dashboard({ onNavigate }) {
   const predictionHistory = data.performance?.prediction_history ?? [];
   const assessmentHistory = data.performance?.assessment_history ?? [];
 
-  const profileName =
-    typeof backendProfile.personal?.name === "string" &&
-    backendProfile.personal.name.length > 0
-      ? backendProfile.personal.name
-      : userName;
+  const profileName = userName;
 
-  const predictionProbability = pctOrNull(
-    data.placementSummary?.placement_probability
-  );
+  const rawProbability = finiteNumberOrNull(data.placementSummary?.placement_probability);
+  const predictionProbability = rawProbability !== null && rawProbability >= 0 && rawProbability <= 1
+    ? pctOrNull(rawProbability) : null;
   const predictionLabel = data.placementSummary?.prediction;
   const predictionConfidence = pctOrNull(data.placementSummary?.confidence);
   const modelVersion = data.placementSummary?.model_version;
@@ -368,20 +336,14 @@ function Dashboard({ onNavigate }) {
   const skillGaps = Array.isArray(readiness.skill_gaps) ? readiness.skill_gaps : [];
 
   const completionPercentage = pctValue(
-    completion?.percentage ?? readiness.profile_completeness?.percentage
+    readiness.profile_completeness?.percentage
   );
 
-  const assessmentsCount = Number.isFinite(Number(summary.assessments_count))
-    ? Number(summary.assessments_count)
-    : null;
-  const skillsAssessed = Number.isFinite(Number(summary.skills_assessed))
-    ? Number(summary.skills_assessed)
-    : null;
+  const assessmentsCount = finiteNumberOrNull(summary.assessments_count);
+  const skillsAssessed = finiteNumberOrNull(summary.skills_assessed);
   const averageScore = pctValue(summary.average_score);
 
-  const skillsTracked = Number.isFinite(Number(summary.skills_tracked))
-    ? Number(summary.skills_tracked)
-    : null;
+  const skillsTracked = finiteNumberOrNull(summary.skills_tracked);
 
   const recommendedCompanies = [
     ...(Array.isArray(data.recommendations?.recommendations?.recommended)
@@ -405,8 +367,8 @@ function Dashboard({ onNavigate }) {
     .filter((entry) => typeof entry.skill === "string" && entry.skill.length > 0);
 
   const donutPercent = readinessScore ?? 0;
-  const predictionDisplay =
-    predictionLabel === "PLACED" ? "LIKELY PLACED" : "PLACEMENT RISK";
+  const predictionDisplay = predictionLabel === "PLACED" ? "LIKELY PLACED"
+    : predictionLabel === "NOT PLACED" ? "PLACEMENT RISK" : "Prediction label unavailable";
 
   return (
     <div className="dashboard">
@@ -443,7 +405,7 @@ function Dashboard({ onNavigate }) {
           }
           icon="prediction"
           accent="blue"
-          chip={predictionProbability === null ? null : "REAL DATA"}
+          chip={predictionProbability === null ? null : "MODEL ESTIMATE"}
         />
         <StatsCard
           title="Profile Completion"
@@ -467,6 +429,42 @@ function Dashboard({ onNavigate }) {
           icon="mocktest"
           accent="orange"
         />
+      </div>
+
+      <div className="dashboard-grid dashboard-estimates">
+        <section className="dash-card dashboard-estimate-card" aria-labelledby="dashboard-probability-title">
+          <div className="dash-card-header">
+            <IconMark name="prediction" className="dash-card-icon blue" />
+            <h2 id="dashboard-probability-title">Placement Probability</h2>
+            <span className="dashboard-model-chip">MODEL ESTIMATE</span>
+          </div>
+          {predictionProbability === null ? <>
+            <p className="dashboard-estimate-empty">Placement estimate unavailable.</p>
+            <p className="dashboard-estimate-inputs">
+              {readyForPrediction ? 'Run a placement prediction to view a model estimate.'
+                : 'Complete and confirm your profile inputs to enable a placement estimate.'}
+            </p>
+          </> : <>
+            <p className="dashboard-estimate-value">{predictionProbability}%</p>
+            <p className="dashboard-estimate-caption">{predictionDisplay}</p>
+            <div className="dashboard-probability-meter" role="meter"
+              aria-labelledby="dashboard-probability-title" aria-describedby="dashboard-probability-note"
+              aria-valuemin={0} aria-valuemax={100} aria-valuenow={predictionProbability}
+              aria-valuetext={`${predictionProbability}% estimated placement probability`}>
+              <span aria-hidden="true" style={{ width: `${predictionProbability}%` }} />
+            </div>
+            <div className="dashboard-meter-scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
+          </>}
+          <p className="dashboard-estimate-qualification" id="dashboard-probability-note">
+            A model estimate from your profile, not a measured placement outcome or a guaranteed offer.
+          </p>
+          <button type="button" className="dashboard-action-link" onClick={() => onNavigate('prediction')}>
+            Open Placement Prediction <span aria-hidden="true">→</span>
+          </button>
+          <p className="dashboard-estimate-caption">Save a profile prediction below to add it to your history.</p>
+        </section>
+        <DashboardSalaryEstimate profile={profile} profileKey={profileKey}
+          profileLoading={profileLoading} profileError={profileError} onNavigate={onNavigate} />
       </div>
 
       <div className="dashboard-grid">
@@ -587,6 +585,9 @@ function Dashboard({ onNavigate }) {
           )}
 
           <p className="dash-card-note">From the backend readiness analysis.</p>
+          <button type="button" className="dashboard-action-link" onClick={() => onNavigate('skillgap')}>
+            Explore skill gaps and learning resources <span aria-hidden="true">→</span>
+          </button>
         </div>
       </div>
 
@@ -622,6 +623,9 @@ function Dashboard({ onNavigate }) {
           )}
 
           <p className="dash-card-note">Verified backend assessment evidence.</p>
+          <button type="button" className="dashboard-action-link" onClick={() => onNavigate('mocktests')}>
+            Take a practice assessment <span aria-hidden="true">→</span>
+          </button>
         </div>
 
         <div className="dash-card">
@@ -656,6 +660,9 @@ function Dashboard({ onNavigate }) {
           <p className="dash-card-note">
             Company requirements are sample/demo data — not real hiring criteria.
           </p>
+          <button type="button" className="dashboard-action-link" onClick={() => onNavigate('companies')}>
+            Explore company matches <span aria-hidden="true">→</span>
+          </button>
         </div>
       </div>
 
@@ -683,6 +690,11 @@ function Dashboard({ onNavigate }) {
       </div>
 
       <div className="dashboard-actions">
+        <button type="button" className="dash-btn primary"
+          disabled={!readyForPrediction || savedPrediction.busy || Boolean(savedPrediction.result)}
+          onClick={() => savedPrediction.run(inputs)}>
+          {savedPrediction.busy ? 'Saving prediction…' : savedPrediction.result ? 'Profile prediction saved' : 'Save profile prediction'}
+        </button>
         <button
           type="button"
           className="dash-btn primary"
@@ -705,6 +717,7 @@ function Dashboard({ onNavigate }) {
           Run New Prediction
         </button>
       </div>
+      {savedPrediction.error && <p className="error-banner" role="alert">{savedPrediction.error}</p>}
     </div>
   );
 }

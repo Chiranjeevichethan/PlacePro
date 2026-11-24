@@ -1,9 +1,9 @@
 /**
  * PlacePro salary prediction service (Phase 5C).
  *
- * REAL BACKEND INTEGRATION: predictSalary() sends the validated 16-field
- * payload to POST /api/salary-predict (Ridge regression model
- * "placepro-salary-v1", trained on placed students only) and returns the
+ * REAL BACKEND INTEGRATION: predictSalary() sends the validated form
+ * fields to POST /api/salary-predict (Ridge regression model
+ * "placepro-salary-v2", trained on placed students only) and returns the
  * backend's authoritative result. No salary value is ever computed,
  * hard-coded, or substituted in the frontend.
  *
@@ -25,11 +25,12 @@ export function formatLpa(value) {
  * Request a salary estimate from the real backend.
  *
  * `formData` is the salary page's form state (prefilled from the student
- * profile). The payload is mapped to the EXACT 16 backend fields
- * (buildSalaryPayload in services/api.js) - branch/tier are normalized to
- * the canonical backend vocabulary ("ISE"/"Information Science..." -> "CSE",
- * "Tier 2" -> "Tier-2"). No student id, placement status, or stored salary
- * value is ever sent.
+ * profile). The payload is mapped to the backend fields (buildSalaryPayload
+ * in services/api.js) - branch is normalized to the canonical backend
+ * vocabulary ("ISE"/"Information Science..." -> "CSE"). A known profile tier
+ * is preserved; a missing tier uses the existing backend fallback.
+ * No student id, placement status, or stored salary value is ever
+ * sent.
  *
  * Returns { predictedSalaryLpa: number, modelVersion: string | null }.
  * Throws an Error with a user-readable message on any failure (validation,
@@ -39,10 +40,10 @@ export async function predictSalary(formData = {}) {
   const payload = buildSalaryPayload(formData);
 
   /* Safety net: the form validates before this point, but never send
-     missing/invalid values to the backend. (branch/college_tier are the
-     only string fields and must be non-empty.) */
+     missing/invalid values to the backend. (branch is the only string field
+     and must be non-empty; optional college_tier is a category.) */
   const hasInvalidInput = Object.entries(payload).some(([field, value]) => {
-    if (field === "branch" || field === "college_tier") {
+    if (field === "branch" || field === 'college_tier') {
       return typeof value !== "string" || value.trim() === "";
     }
     return !Number.isFinite(value);

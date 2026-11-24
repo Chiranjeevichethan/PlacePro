@@ -25,7 +25,8 @@
 
 import os
 import sys
-import tempfile
+
+import pytest
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -35,12 +36,7 @@ PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
 sys.path.insert(0, BACKEND_ROOT)
 sys.path.insert(0, PROJECT_ROOT)
 
-# Isolate the store DB BEFORE any service use (one temp file per run).
-_TMP_DIR = tempfile.mkdtemp(prefix="placepro_companies_store_test_")
-
 from backend.app.services import company_store as store  # noqa: E402
-
-store.reset_for_tests(os.path.join(_TMP_DIR, "companies_test.db"))
 
 from backend.app.services.eligibility_service import (  # noqa: E402
     evaluate_company_eligibility,
@@ -83,7 +79,7 @@ def _demotech_eligible_profile() -> dict:
 
 
 def test_initialization_creates_schema_and_seeds():
-    store.initialize()  # already initialized by reset_for_tests
+    store.initialize()
     assert os.path.exists(store.DB_PATH), "database file must exist"
 
     import sqlite3
@@ -303,17 +299,4 @@ def test_eligibility_and_skill_match_against_store():
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    functions = [
-        value for name, value in sorted(globals().items())
-        if name.startswith("test_") and callable(value)
-    ]
-    failed = 0
-    for fn in functions:
-        try:
-            fn()
-            print(f"  PASS {fn.__name__}")
-        except AssertionError as exc:
-            failed += 1
-            print(f"  FAIL {fn.__name__}: {exc}")
-    print(f"\n{len(functions) - failed}/{len(functions)} passed")
-    sys.exit(1 if failed else 0)
+    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))

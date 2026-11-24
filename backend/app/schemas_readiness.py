@@ -29,6 +29,7 @@ class SkillGapEntry(BaseModel):
     category: str
     priority: str  # HIGH / MEDIUM / LOW
     reason: str
+    evidence_status: str = "MISSING"
 
 
 class ImprovementItem(BaseModel):
@@ -41,7 +42,7 @@ class ImprovementItem(BaseModel):
 class ReadinessBreakdown(BaseModel):
     """Documented, transparent components of the 0-100 score."""
 
-    technical_skills: int = 0
+    technical_skills: float = Field(default=0, ge=0, le=30, allow_inf_nan=False)
     projects: int = 0
     internships: int = 0
     certifications: int = 0
@@ -56,7 +57,8 @@ class ProfileCompletenessView(BaseModel):
 
 class ReadinessResponse(BaseModel):
     profile_id: str
-    readiness_score: int
+    source_revision: Optional[int] = None
+    readiness_score: float = Field(ge=0, le=100, allow_inf_nan=False)
     readiness_level: str
     readiness_breakdown: ReadinessBreakdown
     strengths: List[StrengthEntry] = Field(default_factory=list)
@@ -73,6 +75,8 @@ class PlacementSummaryResponse(BaseModel):
     """
 
     ready_for_prediction: bool
+    profile_id: Optional[str] = None
+    source_revision: Optional[int] = None
     prediction: Optional[str] = None
     placement_probability: Optional[float] = None
     confidence: Optional[float] = None
@@ -80,7 +84,7 @@ class PlacementSummaryResponse(BaseModel):
     missing_fields: List[str] = Field(default_factory=list)
     reason: Optional[str] = None
 
-    readiness_score: int
+    readiness_score: float = Field(ge=0, le=100, allow_inf_nan=False)
     readiness_level: str
     readiness_breakdown: ReadinessBreakdown
     strengths: List[StrengthEntry] = Field(default_factory=list)

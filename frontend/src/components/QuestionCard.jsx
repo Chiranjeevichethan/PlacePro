@@ -14,6 +14,7 @@ function QuestionCard({
   onSubmit,
   isFirst,
   isLast,
+  disabled = false,
 }) {
   return (
     <div className="dash-card question-card">
@@ -44,6 +45,7 @@ function QuestionCard({
               className={`question-option ${selected ? "selected" : ""}`}
               role="radio"
               aria-checked={selected}
+              disabled={disabled}
               onClick={() => onSelectOption(optionIndex)}
             >
               <span className="option-marker" aria-hidden="true">
@@ -70,6 +72,7 @@ function QuestionCard({
             type="button"
             className="dash-btn primary"
             onClick={onSubmit}
+            disabled={disabled}
           >
             Submit Test
           </button>

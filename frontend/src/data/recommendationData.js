@@ -184,8 +184,40 @@ export const LEARNING_RESOURCES = {
     { platform: "YouTube", url: "https://www.youtube.com/results?search_query=data+structures+full+course" },
   ],
   Algorithms: [
+    { platform: "VisuAlgo", url: "https://visualgo.net/" },
     { platform: "freeCodeCamp", url: "https://www.freecodecamp.org/learn" },
     { platform: "YouTube", url: "https://www.youtube.com/results?search_query=algorithms+full+course" },
+  ],
+  OOP: [
+    {
+      platform: "Oracle Java Tutorials",
+      url: "https://docs.oracle.com/javase/tutorial/java/concepts/",
+    },
+    {
+      platform: "MDN Web Docs",
+      url: "https://developer.mozilla.org/en-US/docs/Glossary/OOP",
+    },
+  ],
+  DBMS: [
+    { platform: "SQLBolt", url: "https://sqlbolt.com/" },
+    { platform: "W3Schools", url: "https://www.w3schools.com/sql/" },
+  ],
+  "Operating Systems": [
+    {
+      platform: "Operating Systems: Three Easy Pieces",
+      url: "https://pages.cs.wisc.edu/~remzi/OSTEP/",
+    },
+    {
+      platform: "YouTube",
+      url: "https://www.youtube.com/results?search_query=operating+systems+full+course",
+    },
+  ],
+  "Computer Networks": [
+    { platform: "Cisco Networking Academy", url: "https://www.netacad.com/" },
+    {
+      platform: "YouTube",
+      url: "https://www.youtube.com/results?search_query=computer+networks+full+course",
+    },
   ],
   Java: [
     { platform: "W3Schools", url: "https://www.w3schools.com/java/" },
@@ -219,3 +251,61 @@ export const LEARNING_RESOURCES = {
     { platform: "YouTube", url: "https://www.youtube.com/results?search_query=mongodb+full+course" },
   ],
 };
+
+/**
+ * Common skill-name variations -> the canonical key in LEARNING_RESOURCES.
+ * The backend readiness service returns canonical names (OOP, DBMS,
+ * Operating Systems, Computer Networks), but aliases are matched too so a
+ * differently-spelled skill never falls through to "No learning resources".
+ */
+const LEARNING_RESOURCE_ALIASES = {
+  oop: "OOP",
+  "object oriented": "OOP",
+  "object oriented programming": "OOP",
+  "object-oriented programming": "OOP",
+  dbms: "DBMS",
+  "database management system": "DBMS",
+  "database management systems": "DBMS",
+  os: "Operating Systems",
+  "operating system": "Operating Systems",
+  "operating systems": "Operating Systems",
+  cn: "Computer Networks",
+  "computer network": "Computer Networks",
+  "computer networks": "Computer Networks",
+  ds: "Data Structures",
+  "data structures": "Data Structures",
+  dsa: "Data Structures",
+  "data structures and algorithms": "Data Structures",
+  algo: "Algorithms",
+  algorithms: "Algorithms",
+};
+
+/**
+ * Learning resources for a backend-reported missing skill.
+ *
+ * Exact canonical keys win; otherwise a documented alias is resolved.
+ * Unknown skills return [] (the card then says so honestly). Duplicate URLs
+ * are removed so a card never shows the same link twice.
+ */
+export function getLearningResources(skill) {
+  if (typeof skill !== "string" || skill.trim() === "") return [];
+
+  const name = skill.trim();
+  const key =
+    LEARNING_RESOURCES[name] !== undefined
+      ? name
+      : LEARNING_RESOURCE_ALIASES[name.toLowerCase()] ??
+        LEARNING_RESOURCE_ALIASES[
+          name.toLowerCase().replace(/[^a-z0-9]/g, "")
+        ];
+
+  const resources = key ? LEARNING_RESOURCES[key] : null;
+  if (!Array.isArray(resources)) return [];
+
+  const seen = new Set();
+  return resources.filter((resource) => {
+    if (!resource?.url || seen.has(resource.url)) return false;
+    seen.add(resource.url);
+    return true;
+  });
+}

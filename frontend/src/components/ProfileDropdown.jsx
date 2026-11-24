@@ -1,17 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-
-function readProfileName() {
-  try {
-    const raw = localStorage.getItem("placepro_profile");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.name) return parsed.name;
-    }
-  } catch {
-    // Fall back to the default name below.
-  }
-  return "Bhargav";
-}
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { appHrefForPage, handleAppLinkClick } from "../services/appRoutes.js";
 
 function UserIcon() {
   return (
@@ -41,20 +30,14 @@ function LogoutIcon() {
   );
 }
 
-function ProfileDropdown({ onNavigate, onEditProfile, onLogout }) {
-  const [userName, setUserName] = useState(readProfileName);
+function ProfileDropdown({ currentPage, onNavigate, onEditProfile, onLogout, logoutBusy }) {
+  /* Name comes from the ONE canonical profile — no hardcoded fallback name
+     and no stale localStorage value. */
+  const { profile } = useStudentProfileContext();
+  const userName = profile?.name?.trim() || "Student";
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef(null);
-
-  useEffect(() => {
-    const syncName = () => setUserName(readProfileName());
-    window.addEventListener("storage", syncName);
-    window.addEventListener("placepro-profile-updated", syncName);
-    return () => {
-      window.removeEventListener("storage", syncName);
-      window.removeEventListener("placepro-profile-updated", syncName);
-    };
-  }, []);
+  const triggerRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -67,18 +50,31 @@ function ProfileDropdown({ onNavigate, onEditProfile, onLogout }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowMenu(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showMenu]);
+
   const close = () => setShowMenu(false);
 
-  const avatarLetter = userName ? userName.charAt(0).toUpperCase() : "B";
+  const avatarLetter = userName.charAt(0).toUpperCase();
 
   return (
     <div className="navbar-user" ref={menuRef}>
       <button
         type="button"
         className="navbar-user-trigger"
+        ref={triggerRef}
         onClick={() => setShowMenu((prev) => !prev)}
         aria-expanded={showMenu}
-        aria-haspopup="menu"
       >
         <span className="user-trigger-text">
           <strong>{userName}</strong>
@@ -104,7 +100,7 @@ function ProfileDropdown({ onNavigate, onEditProfile, onLogout }) {
       </button>
 
       {showMenu && (
-        <div className="user-menu" role="menu">
+        <div className="user-menu" role="group" aria-label="Account actions">
           <div className="user-menu-header">
             <div className="user-menu-avatar">{avatarLetter}</div>
 
@@ -116,20 +112,20 @@ function ProfileDropdown({ onNavigate, onEditProfile, onLogout }) {
 
           <div className="user-menu-divider" />
 
-          <button
-            type="button"
+          <a
+            href={appHrefForPage("profile")}
             className="user-menu-item"
-            onClick={() => {
-              onNavigate("profile");
-              close();
+            aria-current={currentPage === "profile" ? "page" : undefined}
+            onClick={(event) => {
+              handleAppLinkClick(event, "profile", onNavigate);
+              if (event.defaultPrevented) close();
             }}
-            role="menuitem"
           >
             <span className="menu-item-icon">
               <UserIcon />
             </span>
             <span>Student Profile</span>
-          </button>
+          </a>
 
           <button
             type="button"
@@ -138,7 +134,6 @@ function ProfileDropdown({ onNavigate, onEditProfile, onLogout }) {
               onEditProfile();
               close();
             }}
-            role="menuitem"
           >
             <span className="menu-item-icon edit">
               <EditIcon />
@@ -151,16 +146,16 @@ function ProfileDropdown({ onNavigate, onEditProfile, onLogout }) {
           <button
             type="button"
             className="user-menu-item logout-item"
+            disabled={logoutBusy}
             onClick={() => {
               onLogout();
               close();
             }}
-            role="menuitem"
           >
             <span className="menu-item-icon logout">
               <LogoutIcon />
             </span>
-            <span>Logout</span>
+            <span>{logoutBusy ? 'Signing out…' : 'Logout'}</span>
           </button>
         </div>
       )}

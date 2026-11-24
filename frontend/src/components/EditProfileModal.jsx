@@ -1,19 +1,22 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { updateStudentProfile } from "../services/api";
+import AccessibleModal from "./AccessibleModal";
+import { createRetryIntent } from '../services/retryIntent';
+import ResumeEvidenceEditor from './ResumeEvidenceEditor';
+import { applyReviewEdits, buildProfileCorrection, validateReviewRecords } from '../services/profileReview';
 import {
   BRANCH_OPTIONS,
   EDIT_RANGES,
   TIER_OPTIONS,
   buildEditState,
-  buildProfilePayload,
 } from "../services/profileConfig";
 
 /**
  * Editable fields are exactly the fields supported by the backend PUT
  * schema (PersonalInfo.name, EducationInfo.branch/cgpa, MlInputs,
  * and the AdditionalInfo subset below). Server-controlled fields
- * (provenance, verified, prediction history, assessment evidence) and
- * structural resume sections are NOT editable here.
+ * (provenance, verified, prediction history, assessment evidence) remain
+ * server controlled. Structural resume sections can be corrected below.
  */
 const FIELDS = [
   { name: "name", label: "Name", type: "text", placeholder: "Full name" },
@@ -103,32 +106,28 @@ const FIELDS = [
   },
 ];
 
-const REQUIRED_TEXT = ["name"];
-const REQUIRED_SELECTS = ["branch", "collegeTier"];
-
 function EditProfileModal({
   profileId,
   profile,
   backendProfile,
   onSaved,
+  onReload,
   onClose = () => {},
 }) {
   const [form, setForm] = useState(() => buildEditState(profile));
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const handleKey = (event) => {
-      if (event.key === "Escape" && !saving) onClose();
-    };
-
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose, saving]);
+  const [evidenceEdits, setEvidenceEdits] = useState({});
+  const [formEdits, setFormEdits] = useState({});
+  const [baseline] = useState(() => backendProfile);
+  const inFlight = useRef(false);
+  const [retryIntent] = useState(createRetryIntent);
+  const [conflict, setConflict] = useState(false);
 
   const setField = (name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
+    setFormEdits((prev) => ({ ...prev, [name]: value }));
     setErrors((prev) => {
       if (!prev[name]) return prev;
       const next = { ...prev };
@@ -141,22 +140,10 @@ function EditProfileModal({
     const next = {};
     const numeric = (value) => value !== "" && Number.isFinite(Number(value));
 
-    REQUIRED_TEXT.forEach((field) => {
-      if (!String(form[field] ?? "").trim()) {
-        next[field] = "This field is required.";
-      }
-    });
-
-    REQUIRED_SELECTS.forEach((field) => {
-      if (!form[field]) {
-        next[field] = "Please select an option.";
-      }
-    });
-
     Object.entries(EDIT_RANGES).forEach(([field, { min, max, label }]) => {
-      const value = form[field];
+      const value = formEdits[field];
 
-      if (String(value ?? "").trim() === "") return; // empty = unchanged
+      if (String(value ?? "").trim() === "") return; // explicit blank clears the field
 
       if (!numeric(value)) {
         next[field] = `${label} must be a number.`;
@@ -166,7 +153,7 @@ function EditProfileModal({
     });
 
     ["githubRepositories", "linkedinConnections"].forEach((field) => {
-      const value = form[field];
+      const value = formEdits[field];
       if (String(value ?? "").trim() !== "" && !numeric(value)) {
         next[field] = "Please enter a valid non-negative number.";
       } else if (numeric(value) && Number(value) < 0) {
@@ -179,6 +166,7 @@ function EditProfileModal({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (inFlight.current) return;
 
     const next = validate();
     if (Object.keys(next).length > 0) {
@@ -188,37 +176,37 @@ function EditProfileModal({
 
     setErrors({});
     setSubmitError(null);
+    setConflict(false);
+    inFlight.current = true;
     setSaving(true);
 
     try {
-      const payload = buildProfilePayload(backendProfile, form);
+      const payload = buildProfileCorrection(baseline, formEdits, evidenceEdits);
+      validateReviewRecords(payload);
       const targetProfileId = profileId || backendProfile?.profile_id;
-      const data = await updateStudentProfile(targetProfileId, payload);
+      const data = await updateStudentProfile(targetProfileId, payload, retryIntent([targetProfileId,payload]));
       onSaved?.(data);
       onClose();
     } catch (err) {
+      setConflict(err?.status === 409);
       // Keep the modal open and the existing profile data untouched.
       setSubmitError(
         err?.message ?? "Unable to save profile changes. Please try again."
       );
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={saving ? undefined : onClose}
-      role="presentation"
+    <AccessibleModal
+      labelledBy="edit-profile-title"
+      describedBy="edit-profile-description"
+      closeBlocked={saving}
+      onEscape={onClose}
+      onBackdropClose={onClose}
     >
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-profile-title"
-        onClick={(event) => event.stopPropagation()}
-      >
         <div className="modal-header">
           <h2 id="edit-profile-title">Edit Profile</h2>
 
@@ -244,6 +232,7 @@ function EditProfileModal({
           </button>
         </div>
 
+        {conflict && <button type="button" className="dash-btn secondary" onClick={onReload}>Reload profile</button>}
         <form onSubmit={handleSubmit} noValidate>
           {submitError && (
             <div className="form-error-summary" role="alert">
@@ -256,6 +245,17 @@ function EditProfileModal({
               const hasError = Boolean(errors[field.name]);
               const value = form[field.name] ?? "";
 
+              /* Keep a resume-extracted branch (e.g. "Information Science and
+                 Engineering") visible and selectable even though it is not a
+                 canonical model category; the API layer applies the existing
+                 ISE -> CSE mapping where needed. */
+              const options =
+                field.name === "branch" &&
+                value &&
+                !BRANCH_OPTIONS.some((option) => option.value === value)
+                  ? [{ value, label: value }, ...BRANCH_OPTIONS]
+                  : field.options;
+
               return (
                 <div key={field.name} className="form-group">
                   <label htmlFor={`edit-${field.name}`}>{field.label}</label>
@@ -264,14 +264,17 @@ function EditProfileModal({
                     <select
                       id={`edit-${field.name}`}
                       name={field.name}
+                      disabled={saving}
                       value={value}
                       onChange={(event) =>
                         setField(field.name, event.target.value)
                       }
                       className={hasError ? "invalid" : ""}
+                      aria-invalid={hasError || undefined}
+                      aria-describedby={hasError ? `edit-${field.name}-error` : undefined}
                     >
                       <option value="">{field.placeholder}</option>
-                      {field.options.map((option) => {
+                      {options.map((option) => {
                         const optionValue =
                           typeof option === "string" ? option : option.value;
                         const optionLabel =
@@ -289,24 +292,33 @@ function EditProfileModal({
                       id={`edit-${field.name}`}
                       type={field.type}
                       name={field.name}
+                      disabled={saving}
                       value={value}
                       onChange={(event) =>
                         setField(field.name, event.target.value)
                       }
                       placeholder={field.placeholder}
                       step={field.step}
+                      min={EDIT_RANGES[field.name]?.min}
+                      max={EDIT_RANGES[field.name]?.max}
                       className={hasError ? "invalid" : ""}
-                      autoFocus={field.name === "name"}
+                      aria-invalid={hasError || undefined}
+                      aria-describedby={hasError ? `edit-${field.name}-error` : undefined}
                     />
                   )}
 
                   {hasError && (
-                    <span className="field-error">{errors[field.name]}</span>
+                    <span className="field-error" id={`edit-${field.name}-error`}>{errors[field.name]}</span>
                   )}
                 </div>
               );
             })}
           </div>
+
+          <p id="edit-profile-description" className="resume-note">Review changes before saving. Corrections replace current claims and require confirmation again. Original extraction and assessment history are retained.</p>
+          <ResumeEvidenceEditor profile={applyReviewEdits(backendProfile, evidenceEdits, false)}
+            includeDetails disabled={saving}
+            onChange={(path, value) => setEvidenceEdits((previous) => ({ ...previous, [path]: value }))} />
 
           <div className="modal-actions">
             <button
@@ -323,8 +335,7 @@ function EditProfileModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </AccessibleModal>
   );
 }
 

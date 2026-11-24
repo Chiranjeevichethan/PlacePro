@@ -1,39 +1,25 @@
-/**
- * useTestTimer - countdown timer hook for mock tests.
- *
- * - Starts at `totalSeconds` and ticks down once per second while `active`.
- * - Calls onExpire() exactly once when it reaches zero (auto-submit).
- * - The interval is cleared whenever `active` flips or the component
- *   unmounts, so there are no memory leaks.
- * - No setState in effect bodies: the countdown updates inside the interval
- *   callback, and expiry is raised through a ref callback. Fresh attempts
- *   reset the timer by remounting the component that uses this hook.
- */
-import { useEffect, useRef, useState } from "react";
+/** Connect the assessment's server deadline and subscribe to its UI state. */
+import { useEffect, useSyncExternalStore } from "react";
 
-export default function useTestTimer({ totalSeconds, onExpire, active }) {
-  const [secondsLeft, setSecondsLeft] = useState(totalSeconds);
-  const expireRef = useRef(onExpire);
+export default function useTestTimer(controller) {
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
   useEffect(() => {
-    expireRef.current = onExpire;
-  }, [onExpire]);
+    const disconnect = controller.connect();
+    const synchronize = () => {
+      const current = controller.getSnapshot();
+      if (!document.hidden && current.phase === "running" && !current.submitting && !current.checking) {
+        void controller.checkStatus();
+      }
+    };
+    window.addEventListener("focus", synchronize);
+    document.addEventListener("visibilitychange", synchronize);
+    return () => {
+      disconnect();
+      window.removeEventListener("focus", synchronize);
+      document.removeEventListener("visibilitychange", synchronize);
+    };
+  }, [controller]);
 
-  useEffect(() => {
-    if (!active) return undefined;
-
-    const interval = setInterval(() => {
-      setSecondsLeft((prev) => Math.max(0, prev - 1));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [active]);
-
-  useEffect(() => {
-    if (active && secondsLeft === 0) {
-      expireRef.current?.();
-    }
-  }, [active, secondsLeft]);
-
-  return { secondsLeft };
+  return state;
 }

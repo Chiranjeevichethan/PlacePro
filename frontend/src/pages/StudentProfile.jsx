@@ -1,7 +1,11 @@
+import { useRef, useState } from "react";
 import IconMark from "../components/IconMark";
 import EditProfileModal from "../components/EditProfileModal";
 import ResumeUploadModal from "../components/ResumeUploadModal";
-import { useStudentProfile } from "../hooks/useProfile";
+import { verifyStudentProfile } from "../services/api";
+import { createRetryIntent } from '../services/retryIntent';
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { getVolunteerExperienceDisplay } from '../services/profileConfig';
 
 function StudentProfile({
   editOpen = false,
@@ -17,12 +21,38 @@ function StudentProfile({
     rawProfile,
     loading,
     error,
+    profileMissing,
     refetch,
     applyUpdatedProfile,
     resumeDraft,
     setPendingResumeDraft,
     clearPendingResumeDraft,
-  } = useStudentProfile();
+  } = useStudentProfileContext();
+
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState(null);
+  const verificationInFlight = useRef(false);
+  const [retryIntent] = useState(createRetryIntent);
+
+  /* Editing a profile resets the backend's `verified` flag (documented
+     contract). This confirmation uses the existing POST /api/profile/verify
+     endpoint so readiness, predictions and recommendations work again. */
+  const handleVerify = () => {
+    if (!rawProfile || verificationInFlight.current) return;
+    verificationInFlight.current = true;
+
+    setVerifying(true);
+    setVerifyError(null);
+
+    verifyStudentProfile(rawProfile, retryIntent(rawProfile))
+      .then((data) => applyUpdatedProfile(data))
+      .catch((err) =>
+        setVerifyError(
+          err?.message ?? "Unable to confirm the profile. Please try again."
+        )
+      )
+      .finally(() => { verificationInFlight.current = false; setVerifying(false); });
+  };
 
   /* Refetch the authoritative profile after a successful verify so the
      "Verified" badge reflects the backend's stored state. */
@@ -54,6 +84,7 @@ function StudentProfile({
       ]
     : [];
 
+  const volunteerDisplay = getVolunteerExperienceDisplay(rawProfile);
   const experienceData = profile
     ? [
         {
@@ -88,8 +119,8 @@ function StudentProfile({
         },
         {
           label: "Volunteer Experience",
-          value: profile.volunteerExperience || "Not set",
-          detail: "Volunteering activity",
+          value: volunteerDisplay.value,
+          detail: volunteerDisplay.detail,
         },
         {
           label: "Open Source Contributions",
@@ -127,12 +158,19 @@ function StudentProfile({
           <button
             type="button"
             className="dash-btn primary"
-            onClick={refetch}
+            onClick={() => refetch()}
           >
             Retry
           </button>
+          {profileMissing && <button type="button" className="dash-btn secondary"
+            onClick={onRequestResume}>Create Profile from Resume</button>}
         </div>
       )}
+      {!loading && !error && !profile && <div className="profile-section">
+        <h2>Create your student profile</h2>
+        <p>Upload a PDF or DOCX resume, review the extraction and confirm your information.</p>
+        <button type="button" className="dash-btn primary" onClick={onRequestResume}>Create Profile from Resume</button>
+      </div>}
 
       {/* =========================================
           PROFILE (backend data only — no demo fallback)
@@ -147,7 +185,7 @@ function StudentProfile({
                 </div>
 
                 <div className="profile-identity">
-                  <h2>{profile.name || "Unnamed Student"}</h2>
+                  <h2>{profile.name || "Student"}</h2>
                   <p>{profile.branchDisplay}</p>
                   <div className="profile-badges">
                     <span className="profile-badge">Student</span>
@@ -166,6 +204,8 @@ function StudentProfile({
                   type="button"
                   className="dash-btn secondary"
                   onClick={onRequestResume}
+                  disabled={verifying}
+                  title="Extract a resume, review selected changes and confirm before updating this profile."
                 >
                   Update from Resume
                 </button>
@@ -180,6 +220,29 @@ function StudentProfile({
               </div>
             </div>
           </div>
+
+          {!profile.verified && (
+            <div className="info-note" role="status">
+              <span>
+                This profile has unverified changes. Confirm it to refresh
+                readiness, predictions and recommendations.
+              </span>
+              <button
+                type="button"
+                className="dash-btn primary"
+                onClick={handleVerify}
+                disabled={verifying || !rawProfile}
+              >
+                {verifying ? "CONFIRMING..." : "Confirm Profile"}
+              </button>
+            </div>
+          )}
+
+          {verifyError && (
+            <div className="error-banner" role="alert">
+              {verifyError}
+            </div>
+          )}
 
           <div className="profile-section">
             <h2>
@@ -221,6 +284,12 @@ function StudentProfile({
               <span>Skills & Assessments</span>
             </h2>
 
+            <p className="form-description">
+              These values are shared with Placement Prediction and Salary
+              Prediction. Fields shown as “Not set” are still missing — use
+              Edit Profile to provide them once.
+            </p>
+
             {profile.skills.length > 0 && (
               <div className="profile-skills-row">
                 {profile.skills.map((skill) => (
@@ -228,6 +297,24 @@ function StudentProfile({
                     {skill}
                   </span>
                 ))}
+              </div>
+            )}
+
+            {Array.isArray(rawProfile?.assessment_evidence) && rawProfile.assessment_evidence.length > 0 && (
+              <div aria-label="Recorded assessments">
+                <h3>Recorded Assessments</h3>
+                <p className="form-description">
+                  Assessment results are saved separately from your resume skills and self-reported scores.
+                </p>
+                <div className="profile-grid">
+                  {rawProfile.assessment_evidence.map((entry) => (
+                    <div className="profile-item" key={entry.assessment_id}>
+                      <span>{entry.skill}</span>
+                      <strong>{entry.score}% · {entry.level}</strong>
+                      <small>Attempt {entry.attempt} · {entry.verified ? "Recorded assessment" : "Unverified"}</small>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -284,19 +371,23 @@ function StudentProfile({
         </>
       )}
 
-      {editOpen && profile && rawProfile && (
+      {editOpen && !loading && !error && profile && rawProfile && (
         <EditProfileModal
+          key={profileId}
           profileId={profileId}
           profile={profile}
           backendProfile={rawProfile}
           onSaved={applyUpdatedProfile}
+          onReload={() => { onCloseEdit?.(); refetch(); }}
           onClose={onCloseEdit}
         />
       )}
 
-      {resumeOpen && (
+      {resumeOpen && !loading && (!error || profileMissing) && (
         <ResumeUploadModal
+          key={profileId}
           resumeDraft={resumeDraft}
+          preservedProfile={rawProfile}
           onDraftCreated={(result) => setPendingResumeDraft(result.draftProfile)}
           onVerified={handleResumeVerified}
           onClose={onCloseResume}

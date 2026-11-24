@@ -59,7 +59,8 @@ from .eligibility_service import evaluate_company_eligibility
 from .ml_feature_mapping import check_profile_completion
 from .prediction_service import predict as predict_with_model
 from .profile_service import get_profile
-from .readiness_service import collect_verified_skills, get_readiness
+from .readiness_service import readiness_for_profile
+from .skill_evidence import resolve_skill_evidence, skill_status
 
 # ------------------------------------------------------------
 # CONFIG
@@ -92,34 +93,33 @@ class RecommendationServiceError(Exception):
 
 
 def compute_skill_match(company: dict, present_skills: set,
-                        assessed: dict = None) -> dict:
+                        assessed: dict = None, *, evidence=None) -> dict:
     """Required/preferred skill match for one company.
 
     assessed: {skill: {score, ...}} - Phase 17 verified assessment
     evidence. When a skill HAS an assessment, the assessment is the
     PRIMARY evidence: a required skill counts as matched only when
     the score is >= ASSESSMENT_SATISFIED_MIN_SCORE (Intermediate+).
-    A resume mention alone no longer satisfies a required skill once
-    an assessment exists (the student may have listed it but scored
-    below the threshold). Skills without any assessment fall back to
-    the verified-skill set (resume/user mentions).
+    A trusted low assessment overrides a mention. Missing/invalid/unverified
+    scores never become zero and cannot override a confirmed claim. All
+    decisions delegate to the shared evidence resolver.
 
     Returns {score, required_matched, required_missing,
              preferred_matched, preferred_missing}. Score is
       round((0.75 * required_fraction + 0.25 * preferred_fraction) * 100, 1)
     with a fraction of 1.0 when a category has no skills configured.
     """
-    from .assessment_service import ASSESSMENT_SATISFIED_MIN_SCORE
-
-    assessed = assessed or {}
+    # Keep the legacy helper signature; interpretation still uses one resolver.
+    evidence = evidence or resolve_skill_evidence({
+        "verified": True, "skills": {"other_skills": list(present_skills)},
+        "assessment_evidence": list((assessed or {}).values()),
+    })
     requirements = company.get("requirements") or {}
     required = list(requirements.get("required_skills") or [])
     preferred = list(requirements.get("preferred_skills") or [])
 
     def satisfied(skill):
-        if skill in assessed:
-            return (assessed[skill].get("score") or 0) >= ASSESSMENT_SATISFIED_MIN_SCORE
-        return skill in present_skills
+        return skill_status(evidence, skill) == "SATISFIED"
 
     required_matched = [s for s in required if satisfied(s)]
     required_missing = [s for s in required if not satisfied(s)]
@@ -219,6 +219,10 @@ def _build_reasons(item_ctx) -> list:
         return reasons
 
     if status == "INCOMPLETE":
+        uncertainties = [r["explanation"] for r in eligibility["requirements"]["unknown"]
+                         if r["mandatory"]]
+        if uncertainties:
+            return ["Eligibility cannot be confirmed: " + explanation for explanation in uncertainties]
         missing = eligibility.get("missing_information") or []
         if missing:
             return [
@@ -254,15 +258,15 @@ def _require_verified(profile) -> None:
 
 
 def build_recommendation(profile, company, readiness, placement_probability,
-                         present_skills, assessed=None) -> dict:
+                         present_skills, assessed=None, *, evidence=None) -> dict:
     """One company's recommendation for a verified profile.
 
-    `assessed` is the Phase 17 verified assessment evidence
-    ({skill: {score, ...}}); when present it becomes the primary
-    evidence for skill matching (see compute_skill_match).
+    The profile snapshot is authoritative. Legacy present_skills/assessed
+    arguments remain accepted; production decisions use its shared resolution.
     """
-    eligibility = evaluate_company_eligibility(profile, company)
-    skill_match = compute_skill_match(company, present_skills, assessed)
+    evidence = evidence or resolve_skill_evidence(profile)
+    eligibility = evaluate_company_eligibility(profile, company, evidence)
+    skill_match = compute_skill_match(company, present_skills, assessed, evidence=evidence)
 
     readiness_score = readiness["readiness_score"]
     completeness_pct = readiness["profile_completeness"]["percentage"]
@@ -321,7 +325,7 @@ def _placement_probability(profile):
     return result["placement_probability"]
 
 
-def get_recommendations(profile_id: str, limit=None) -> dict:
+def get_recommendations(profile_id: str, limit=None, *, snapshot=None) -> dict:
     """Rank every active company for a verified profile.
 
     Grouped into recommended / eligible / incomplete /
@@ -330,26 +334,20 @@ def get_recommendations(profile_id: str, limit=None) -> dict:
     of items, filling buckets in priority order so semantics are
     preserved.
     """
-    profile, _ = get_profile(profile_id)  # raises ProfileNotFoundError
+    profile = snapshot if snapshot is not None else get_profile(profile_id)[0]
     _require_verified(profile)
 
-    readiness = get_readiness(profile_id)  # Phase 12 (verified enforced)
+    evidence = resolve_skill_evidence(profile)
+    readiness = readiness_for_profile(profile, evidence)
     placement_probability = _placement_probability(profile)
-    present_skills = {e["skill"] for e in collect_verified_skills(profile)}
-
-    # Phase 17: verified assessment evidence (latest score per skill)
-    from .assessment_service import get_assessment_evidence
-
-    assessed = {
-        e["skill"]: e for e in get_assessment_evidence(profile)
-    }
+    present_skills = evidence["satisfied_skills"]
 
     grouped = {"recommended": [], "eligible": [],
                "incomplete": [], "not_recommended": []}
     for company in get_active_companies():
         item = build_recommendation(
             profile, company, readiness, placement_probability,
-            present_skills, assessed,
+            present_skills, evidence=evidence,
         )
         grouped[item["status"].lower()].append(item)
 
@@ -367,4 +365,5 @@ def get_recommendations(profile_id: str, limit=None) -> dict:
                 grouped[bucket] = grouped[bucket][:remaining]
             remaining -= len(grouped[bucket])
 
-    return {"profile_id": profile["profile_id"], "recommendations": grouped}
+    return {"profile_id": profile["profile_id"], "source_revision": profile.get('revision', 0),
+            "recommendations": grouped}

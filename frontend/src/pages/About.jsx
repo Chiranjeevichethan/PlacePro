@@ -30,7 +30,7 @@ const features = [
     icon: "model",
     title: "Machine Learning Based Prediction",
     description:
-      "Uses ML classification models trained on the placement dataset.",
+      "Uses the trained placement model served by the FastAPI backend.",
   },
 ];
 
@@ -45,13 +45,13 @@ const steps = [
     step: "02",
     title: "Inputs Are Validated",
     description:
-      "The form validates numerical ranges (CGPA, scores, attendance, hours) before submission.",
+      "The form and backend validate academic values, skill scores, and activity counts before prediction.",
   },
   {
     step: "03",
     title: "Prediction Is Generated",
     description:
-      "The system analyzes the profile and returns a placement probability. Currently a demo result - the real ML API will replace this.",
+      "The FastAPI backend scores the profile with the trained placement model and returns a placement probability.",
   },
   {
     step: "04",
@@ -93,9 +93,38 @@ const stackData = [
   },
 ];
 
+/* Project team (confirmed members, in the agreed order). No photos,
+ * qualifications or achievements are invented here. */
+const teamMembers = [
+  {
+    initial: "C",
+    name: "Chiranjeevi M Chethan",
+    role: "Team Lead | Backend & ML Developer",
+    badge: "Team Lead",
+  },
+  {
+    initial: "B",
+    name: "Bhargav",
+    role: "Frontend Developer",
+    badge: "Frontend",
+  },
+  {
+    initial: "G",
+    name: "Gagana",
+    role: "Data Analysis & Testing",
+    badge: "Data & Testing",
+  },
+  {
+    initial: "H",
+    name: "Habbu Kiran",
+    role: "Documentation",
+    badge: "Documentation",
+  },
+];
+
 const futureScope = [
-  "Live API integration with the trained ML models",
-  "Personalized recommendation engine per student",
+  "Independent evaluation using verified placement outcomes",
+  "Verified recruitment requirements beyond the current demonstration data",
   "Batch analysis of entire student cohorts for institutions",
   "Model improvements via hyperparameter tuning and more algorithms",
   "Role-specific placement suggestions",
@@ -184,26 +213,25 @@ function About() {
           <span>Machine Learning</span>
         </h2>
         <p>
-          The ML pipeline loads the placement dataset, preprocesses it (handling
-          missing values, encoding categorical columns, removing data-leakage
-          columns), and trains classification models. The models used are:
+          The application loads existing trained models through the FastAPI
+          backend. Your submitted inputs are validated and preprocessed for
+          prediction. The models currently served are:
         </p>
 
         <ul className="about-list">
           <li>
-            <strong>Decision Tree Classifier</strong> - accuracy approximately
-            51.26%
+            <strong>Logistic Regression</strong> for placement probability
           </li>
           <li>
-            <strong>Random Forest Classifier</strong> - accuracy approximately
-            55.19% (current best model)
+            <strong>Ridge Regression</strong> for annual salary estimates in LPA,
+            conditional on placement
           </li>
         </ul>
 
         <p>
-          These accuracy values come from the project's initial model run
-          (<code>results.txt</code>). Model performance will continue to improve
-          as the dataset and pipeline evolve.
+          The available dataset is described as synthetic. Successful predictions
+          demonstrate that the application works; they do not establish accuracy
+          on real student outcomes or guarantee placement or salary.
         </p>
       </div>
 
@@ -256,33 +284,14 @@ function About() {
         </h2>
 
         <div className="team-grid">
-          <div className="team-card">
-            <div className="team-avatar">B</div>
-            <h3>Bhargav</h3>
-            <p>Frontend Developer</p>
-            <span>Team Member 1</span>
-          </div>
-
-          <div className="team-card">
-            <div className="team-avatar">?</div>
-            <h3>Team Member 2</h3>
-            <p>Backend & ML Developer</p>
-            <span>Team Member 2</span>
-          </div>
-
-          <div className="team-card">
-            <div className="team-avatar">?</div>
-            <h3>Team Member 3</h3>
-            <p>ML & Data Analysis</p>
-            <span>Team Member 3</span>
-          </div>
-
-          <div className="team-card">
-            <div className="team-avatar">?</div>
-            <h3>Team Member 4</h3>
-            <p>Testing & Documentation</p>
-            <span>Team Member 4</span>
-          </div>
+          {teamMembers.map((member) => (
+            <div key={member.name} className="team-card">
+              <div className="team-avatar">{member.initial}</div>
+              <h3>{member.name}</h3>
+              <p>{member.role}</p>
+              <span>{member.badge}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

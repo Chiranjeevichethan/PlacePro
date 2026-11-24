@@ -4,23 +4,22 @@
 #
 # Secure upload handling + orchestration:
 #
-#   validate -> temp storage -> text extraction -> structured parse
+#   validate -> bounded in-memory text extraction -> structured parse
 #
 # SECURITY
 #   - Allowed extensions only (.pdf / .docx)
 #   - Magic-byte validation (authoritative) + MIME check where sent
 #   - Hard file-size limit
 #   - Empty / corrupted files rejected with useful errors
-#   - Uploads go to a random temp file (client filename is NEVER used
-#     for path construction -> no path traversal) and are deleted
-#     after processing (TemporaryDirectory cleanup)
+#   - No persistent upload copy; client filename is never used as a path
+#   - DOCX archive membership/expanded-size and extraction bounds
 #   - Uploaded files are only parsed - never executed
 #
 # ============================================================
 
 import os
-import tempfile
-import uuid
+import io
+import zipfile
 
 from .resume_parser import (
     ExtractionError,
@@ -48,6 +47,8 @@ ALLOWED_MIME_TYPES = {
 # Magic bytes (authoritative file-type check)
 PDF_MAGIC = b"%PDF"
 ZIP_MAGIC = b"PK\x03\x04"  # DOCX is a ZIP archive
+MAX_DOCX_EXPANDED_SIZE = 25 * 1024 * 1024
+MAX_DOCX_MEMBERS = 1000
 
 
 # ------------------------------------------------------------
@@ -123,6 +124,20 @@ def validate_upload(filename: str, content: bytes, content_type=None) -> str:
             f"{magic_type.upper()}."
         )
 
+    if declared_type == 'docx':
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                entries=archive.infolist()
+                names=[entry.filename for entry in entries]
+                if (len(entries)>MAX_DOCX_MEMBERS or len(set(names))!=len(names) or
+                        sum(entry.file_size for entry in entries)>MAX_DOCX_EXPANDED_SIZE or
+                        any(entry.flag_bits & 1 for entry in entries)):
+                    raise CorruptedFileError('DOCX archive exceeds safe limits or is encrypted.')
+                if not {'[Content_Types].xml','word/document.xml'} <= set(names):
+                    raise CorruptedFileError('The archive is not a DOCX document.')
+        except (zipfile.BadZipFile,ValueError,OSError) as error:
+            raise CorruptedFileError('The DOCX archive is malformed.') from error
+
     # MIME type check where the client provides one (magic bytes stay
     # authoritative; application/octet-stream is treated as unknown).
     if content_type and content_type != "application/octet-stream":
@@ -132,6 +147,10 @@ def validate_upload(filename: str, content: bytes, content_type=None) -> str:
                 "Allowed: application/pdf, "
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
+        expected_mime=('application/pdf' if declared_type=='pdf' else
+                       'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        if content_type!=expected_mime:
+            raise UnsupportedFileTypeError('The declared MIME type does not match the document format.')
 
     return declared_type
 
@@ -160,55 +179,50 @@ def _process_resume_upload_full(filename: str, content: bytes, content_type=None
     """
     file_type = validate_upload(filename, content, content_type)
 
-    # Temp storage: random name (never the client filename), removed on exit.
-    with tempfile.TemporaryDirectory(prefix="placepro_resume_") as tmp_dir:
-        tmp_path = os.path.join(tmp_dir, f"upload_{uuid.uuid4().hex}.{file_type}")
-        with open(tmp_path, "wb") as f:
-            f.write(content)
-
-        try:
-            extraction = extract_text(content, file_type)
-        except NoTextExtractionError as exc:
-            # Structurally valid but contains NO extractable text
-            # (scanned/image-only PDF). Not corruption: report it as
-            # OCR_REQUIRED instead of silently returning an empty
-            # profile or a misleading 422.
-            response = {
-                "success": False,
-                "filename": filename,
-                "file_type": file_type,
-                "extraction": {
-                    "raw_text_preview": "",
-                    "page_count": None,
-                    "extraction_success": False,
-                    "ocr_required": True,
-                },
-                "extracted_profile": {
-                    "name": None, "email": None, "phone": None,
-                    "location": None, "linkedin": None, "github": None,
-                    "portfolio": None,
-                    "education": {"degree": None, "branch": None,
-                                  "college": None, "cgpa": None,
-                                  "graduation_year": None},
-                    "skills": {"programming_languages": [], "frameworks": [],
-                                "databases": [], "cloud": [], "ai_ml": [],
-                                "web_technologies": [], "tools": [],
-                                "other_skills": []},
-                    "experience": [], "internships": [], "projects": [],
-                    "certifications": [],
-                    "achievements": {"hackathons": [], "awards": [],
-                                      "coding_achievements": []},
-                },
-                "verification": {
-                    "confidence": {},
-                    "needs_verification": [],
-                },
-            }
-            return response, ""
-        except ExtractionError as exc:
-            # A file that passes magic bytes but cannot be parsed
-            # (e.g. truncated PDF / damaged DOCX) is a 422, not a 500.
-            raise CorruptedFileError(str(exc)) from exc
+    # Extract directly from bounded bytes; no persistent upload copy.
+    try:
+        extraction = extract_text(content, file_type)
+    except NoTextExtractionError as exc:
+        # Structurally valid but contains NO extractable text
+        # (scanned/image-only PDF). Not corruption: report it as
+        # OCR_REQUIRED instead of silently returning an empty
+        # profile or a misleading 422.
+        response = {
+            "success": False,
+            "filename": filename,
+            "file_type": file_type,
+            "extraction": {
+                "raw_text_preview": "",
+                "page_count": None,
+                "extraction_success": False,
+                "ocr_required": file_type == 'pdf',
+            },
+            "extracted_profile": {
+                "name": None, "email": None, "phone": None,
+                "location": None, "linkedin": None, "github": None,
+                "portfolio": None,
+                "education": {"degree": None, "branch": None,
+                              "college": None, "cgpa": None,
+                              "graduation_year": None},
+                "skills": {"programming_languages": [], "frameworks": [],
+                            "databases": [], "cloud": [], "ai_ml": [],
+                            "web_technologies": [], "tools": [],
+                            "other_skills": []},
+                "experience": [], "internships": [], "projects": [],
+                "certifications": [],
+                "achievements": {"hackathons": [], "awards": [],
+                                  "coding_achievements": []},
+            },
+            "verification": {
+                "confidence": {},
+                "needs_verification": [],
+            },
+        }
+        return response, ""
+    except ExtractionError as exc:
+        # A file that passes magic bytes but cannot be parsed
+        # (e.g. truncated PDF / damaged DOCX) is a 422, not a 500.
+        raise CorruptedFileError(str(exc)) from exc
 
     raw_text = extraction["raw_text"]
     profile, confidence, needs_verification = parse_resume(raw_text)

@@ -16,7 +16,7 @@
 /** Demo profile id — canonical value from backend/scripts/seed_demo_profile.py
  * ("frontend uses VITE_DEMO_PROFILE_ID=demo-student"). Not an invented id. */
 export const DEMO_PROFILE_ID =
-  import.meta.env.VITE_DEMO_PROFILE_ID || "demo-student";
+  import.meta.env?.VITE_DEMO_PROFILE_ID || "demo-student";
 
 /* ------------------------------------------------------------------ */
 /* Display labels (display-only; canonical backend values are kept     */
@@ -177,6 +177,130 @@ export function flattenBackendProfile(backendProfile) {
   };
 }
 
+/** Display-only volunteer evidence. Keep the separate manual declaration used
+ * by editing/payloads untouched; a display must never backfill stored fields. */
+export function getVolunteerExperienceDisplay(backendProfile) {
+  const p = backendProfile ?? {};
+  const text = (value) => typeof value === 'string' ? value.trim() : '';
+  const manual = text(p.additional_info?.volunteer_experience);
+  const records = (Array.isArray(p.experience) ? p.experience : [])
+    .filter((entry) => /\bvolunteer(?:ing)?\b/i.test(text(entry?.role))
+      && !/\bnon[\s-]+volunteer/i.test(text(entry?.role)))
+    .map((entry) => {
+      const company = text(entry.company);
+      const technologies = (Array.isArray(entry.technologies) ? entry.technologies : [])
+        .map(text).filter(Boolean).join(', ');
+      return [text(entry.role) + (company ? ` at ${company}` : ''),
+        text(entry.duration), technologies].filter(Boolean).join(' · ');
+    });
+  if (records.length) return {
+    value: records.join('; '),
+    detail: manual ? `Recorded volunteer roles. Self-reported volunteering: ${manual}`
+      : 'Recorded volunteer roles from your profile.',
+  };
+  return { value: manual || 'Not set', detail: manual ? 'Self-reported volunteering'
+    : 'No volunteer role or self-reported value available' };
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared profile -> prediction form prefill                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Number -> form string. Counts are real profile data (the backend
+ * derives them from the confirmed lists), so 0 is prefilled as "0"
+ * rather than hidden as "missing".
+ */
+/**
+ * Branch values that the production model cannot encode as-is (it knows
+ * CSE, IT, ECE, EE, ME, CE, Chemical). The Information-Science family is
+ * shown in the form as ISE but maps to CSE, matching services/api.js.
+ */
+const PREDICTION_BRANCH_SYNONYMS = {
+  ISE: "CSE",
+  "Information Science": "CSE",
+  "Information Science and Engineering": "CSE",
+  "Information Science & Engineering": "CSE",
+};
+
+const toPredictionBranch = (branch) =>
+  PREDICTION_BRANCH_SYNONYMS[branch] ?? branch;
+
+const countText = (value) => {
+  const parsed = Number(value);
+  return value !== null && value !== undefined && Number.isFinite(parsed)
+    ? String(parsed)
+    : "";
+};
+
+/** Drop empty values so a prefill never wipes something the user typed. */
+const withoutEmptyValues = (values) =>
+  Object.fromEntries(
+    Object.entries(values).filter(
+      ([, value]) => value !== "" && value !== null && value !== undefined
+    )
+  );
+
+/**
+ * The placement form's 16 model inputs, filled from the ONE canonical
+ * student profile (GET /api/profile/{id}). Only fields with real profile
+ * values are returned; missing values stay missing (the form asks for them
+ * instead of inventing a default).
+ *
+ * Coding and communication skills are shared on the profile's 1-10 scale,
+ * exactly like the production model's inputs.
+ */
+export function buildPredictionDraftFromProfile(profile) {
+  const p = profile ?? {};
+
+  return withoutEmptyValues({
+    branch: toPredictionBranch(p.branch) || "",
+    collegeTier: p.collegeTier || "",
+    cgpa: p.cgpa || "",
+    backlogs: p.backlogs || "",
+    codingSkill: p.codingSkills || "",
+    dsaScore: p.dsaScore || "",
+    aptitudeScore: p.aptitudeScore || "",
+    communicationSkill: p.communicationSkills || "",
+    mlKnowledge: p.mlKnowledge || "",
+    systemDesign: p.systemDesign || "",
+    internships: countText(p.internshipsCount),
+    projects: countText(p.projectsCount),
+    certifications: countText(p.certificationsCount),
+    hackathons: countText(p.hackathonsCount),
+    openSourceContributions: p.openSourceContributions || "",
+    extracurricular: p.extracurriculars || "",
+  });
+}
+
+/**
+ * The salary form's model inputs, filled from the SAME canonical profile.
+ * Preserve a known college tier. Missing tier stays missing so the existing
+ * backend fallback remains available.
+ */
+export function buildSalaryDraftFromProfile(profile) {
+  const p = profile ?? {};
+
+  return withoutEmptyValues({
+    branch: p.branch || "",
+    collegeTier: p.collegeTier || "",
+    cgpa: p.cgpa || "",
+    backlogs: p.backlogs || "",
+    codingSkills: p.codingSkills || "",
+    dsaScore: p.dsaScore || "",
+    aptitudeScore: p.aptitudeScore || "",
+    communicationSkills: p.communicationSkills || "",
+    mlKnowledge: p.mlKnowledge || "",
+    systemDesign: p.systemDesign || "",
+    internships: countText(p.internshipsCount),
+    projects: countText(p.projectsCount),
+    certifications: countText(p.certificationsCount),
+    hackathons: countText(p.hackathonsCount),
+    openSourceContributions: p.openSourceContributions || "",
+    extracurriculars: p.extracurriculars || "",
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Edit state: flat display object -> flat modal form state (strings)  */
 /* ------------------------------------------------------------------ */
@@ -219,6 +343,7 @@ export function buildProfilePayload(backendProfile, editState) {
 
   return {
     profile_id: p.profile_id ?? null,
+    revision: p.revision ?? null,
 
     personal: {
       ...personal,

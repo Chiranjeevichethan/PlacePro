@@ -19,6 +19,10 @@
 
 import io
 import re
+from datetime import datetime
+
+MAX_RESUME_PAGES = 50
+MAX_EXTRACTED_CHARACTERS = 200_000
 
 # ------------------------------------------------------------
 # EXTRACTION ERRORS
@@ -49,9 +53,16 @@ def extract_text_from_pdf(content: bytes) -> dict:
 
     try:
         reader = PdfReader(io.BytesIO(content))
+        if len(reader.pages)>MAX_RESUME_PAGES:
+            raise ExtractionError('Resume PDF exceeds the 50-page extraction limit.')
         page_texts = []
+        text_size=0
         for page in reader.pages:
-            page_texts.append(page.extract_text() or "")
+            text=page.extract_text() or ""
+            text_size+=len(text)
+            if text_size>MAX_EXTRACTED_CHARACTERS:
+                raise ExtractionError('Resume text exceeds the extraction limit.')
+            page_texts.append(text)
         raw_text = "\n".join(page_texts)
         page_count = len(reader.pages)
     except ExtractionError:
@@ -83,18 +94,32 @@ def extract_text_from_docx(content: bytes) -> dict:
 
     try:
         document = docx.Document(io.BytesIO(content))
-        parts = [p.text for p in document.paragraphs if p.text.strip()]
-        for table in document.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    if cell.text.strip():
-                        parts.append(cell.text)
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+
+        def ordered_text(container):
+            for block in container.iter_inner_content():
+                if isinstance(block, Paragraph):
+                    if block.text.strip():
+                        yield block.text
+                elif isinstance(block, Table):
+                    for row in block.rows:
+                        seen_cells = set()
+                        for cell in row.cells:
+                            # Merged cells may be exposed more than once.
+                            if cell._tc not in seen_cells:
+                                seen_cells.add(cell._tc)
+                                yield from ordered_text(cell)
+
+        parts = list(ordered_text(document))
     except Exception as exc:
         raise ExtractionError(
             f"Could not read the DOCX file (it may be corrupted): {exc}"
         ) from exc
 
     raw_text = "\n".join(parts)
+    if len(raw_text)>MAX_EXTRACTED_CHARACTERS:
+        raise ExtractionError('Resume text exceeds the extraction limit.')
 
     if not raw_text.strip():
         raise NoTextExtractionError(
@@ -133,17 +158,40 @@ SECTION_HEADINGS = {
     ],
     "experience": [
         "work experience", "professional experience", "employment history",
-        "work history", "experience",
+        "work history", "experience", "experience and internships",
+        "experience & internships", "work experience and internships",
     ],
-    "internships": ["internships", "internship", "intern"],
+    "internships": ["internships", "internship", "intern", "internship experience"],
     "projects": [
         "academic projects", "personal projects", "project experience",
-        "projects",
+        "projects", "project",
     ],
     "certifications": ["certifications", "certificates", "credentials", "certification"],
+    # Later sections not extracted by PlacePro are still RECOGNIZED so
+    # they bound the preceding section instead of bleeding into it
+    # (e.g. hackathon lines becoming "certifications").
+    "hackathons": [
+        "hackathons and open source", "hackathons & open source",
+        "hackathons",
+    ],
+    "open_source": [
+        "open source contributions", "open-source contributions",
+        "open source", "open-source",
+    ],
+    "extracurriculars": [
+        "extracurricular activities", "extra-curricular activities",
+        "extracurriculars",
+    ],
     "achievements": [
         "achievements", "awards", "honors", "honours", "accomplishments",
         "achievement",
+    ],
+    # Boundaries only: these sections must not leak into extracted records.
+    "other": [
+        "summary", "professional summary", "profile", "objective",
+        "career objective", "interests", "hobbies", "languages",
+        "references", "publications", "coursework", "relevant coursework",
+        "training", "personal details", "declaration", "student profile fields",
     ],
 }
 
@@ -152,37 +200,39 @@ def _heading_pattern(keyword: str) -> re.Pattern:
     # Whole-line heading: optional bullets / numbers / separators,
     # then the keyword, then an optional colon. Case-insensitive.
     return re.compile(
-        rf"^\s*[\#\*•·\-–—\d\.\)]*\s*{re.escape(keyword)}\s*:?\s*$",
+        rf"^\s*[\#\*•·\x7f\uf0b7\u0095\-–—\d\.\)]*\s*{re.escape(keyword)}"
+        rf"\s*(?::\s*)?(?:\(?\d+\)?)?\s*$",
         re.IGNORECASE,
     )
 
 
+_HEADING_PATTERNS = [(section, _heading_pattern(keyword))
+                     for section, keywords in SECTION_HEADINGS.items()
+                     for keyword in sorted(keywords, key=len, reverse=True)]
+
+
+def _section_heading(line):
+    for section, pattern in _HEADING_PATTERNS:
+        if pattern.match(line):
+            return section
+    return None
+
+
 def detect_sections(lines):
-    """Map section name -> (start_line, end_line) for the detected headings."""
-    # (line_index, section, keyword) for the first match of each keyword
+    """First span per section; every known heading bounds the preceding span.
+
+    Capitalization alone is never a boundary: uppercase certificate titles
+    and project names are valid content. Repeated headings also bound spans.
+    """
     heading_matches = []
-    for section, keywords in SECTION_HEADINGS.items():
-        for keyword in keywords:
-            pattern = _heading_pattern(keyword)
-            for i, line in enumerate(lines):
-                if pattern.match(line):
-                    heading_matches.append((i, section, keyword))
-                    break
-
-    # Keep the earliest heading per section; longest keyword on ties.
-    best = {}
-    for i, section, keyword in heading_matches:
-        current = best.get(section)
-        if current is None or i < current[0] or (
-            i == current[0] and len(keyword) > len(current[1])
-        ):
-            best[section] = (i, keyword)
-
-    ordered = sorted(best.items(), key=lambda kv: kv[1][0])
+    for i, line in enumerate(lines):
+        section = _section_heading(line)
+        if section:
+            heading_matches.append((i, section))
     sections = {}
-    for idx, (section, (start, _)) in enumerate(ordered):
-        end = ordered[idx + 1][1][0] if idx + 1 < len(ordered) else len(lines)
-        sections[section] = (start, end)
+    for idx, (start, section) in enumerate(heading_matches):
+        end = heading_matches[idx + 1][0] if idx + 1 < len(heading_matches) else len(lines)
+        sections.setdefault(section, (start, end))
     return sections
 
 
@@ -190,6 +240,21 @@ def _section_text(lines, span):
     """Join the lines of a section, excluding its heading line."""
     start, end = span
     return "\n".join(lines[start + 1:end])
+
+
+def _section_blocks(lines, section):
+    """All spans of a section, still bounded by every recognized heading."""
+    blocks = []
+    current = None
+    for line in lines:
+        heading = _section_heading(line)
+        if heading:
+            current = [] if heading == section else None
+            if current is not None:
+                blocks.append(current)
+        elif current is not None:
+            current.append(line)
+    return blocks
 
 
 # ------------------------------------------------------------
@@ -210,6 +275,13 @@ YEAR_RE = re.compile(r"\b20\d{2}\b")
 
 DATE_RANGE_RE = re.compile(
     r"\b(20\d{2})\s*(?:[-–—~]|to)\s*(20\d{2}|present|current|now|till\s*date)?\b",
+    re.IGNORECASE,
+)
+
+_MONTH = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+_ENTRY_DATE = rf"(?:(?:{_MONTH})\.?\s+)?20\d{{2}}|(?:0?[1-9]|1[0-2])[/.-]20\d{{2}}"
+ENTRY_DATE_RANGE_RE = re.compile(
+    rf"(?<!\w)(?:{_ENTRY_DATE})\s*(?:[-–—~]|to)\s*(?:{_ENTRY_DATE}|present|current|now|till\s*date)(?!\w)",
     re.IGNORECASE,
 )
 
@@ -365,32 +437,26 @@ def _word_boundary_pattern(keyword: str) -> re.Pattern:
 def scan_skills(text: str) -> dict:
     """Return {category: [skill, ...]} for skills actually present in text.
 
-    Order of appearance is preserved; subsumed keywords are dropped
-    (e.g. 'Spring' is removed when 'Spring Boot' is also present).
+    Longest overlapping mention wins. Separately stated skills are retained;
+    aliases normalize spellings, never imply an additional skill.
     """
-    matches = []  # (position, category, keyword)
+    aliases = {'React': ['React.js', 'ReactJS'], 'Node.js': ['NodeJS'],
+               'Vue.js': ['VueJS'], 'Express.js': ['ExpressJS'], 'Next.js': ['NextJS']}
+    matches = []  # (start, end, category, canonical keyword)
     for category, keywords in SKILL_TAXONOMY.items():
         for keyword in keywords:
-            m = _word_boundary_pattern(keyword).search(text)
-            if m:
-                matches.append((m.start(), category, keyword))
-
-    matches.sort(key=lambda t: t[0])
-
-    # Drop keywords subsumed by a longer matched keyword (e.g. Spring in Spring Boot)
-    kept = []
-    for pos, category, keyword in matches:
-        subsumed = any(
-            keyword.lower() in other.lower()
-            for _, _, other in kept
-            if len(other) > len(keyword)
-        )
-        if not subsumed:
-            kept.append((pos, category, keyword))
-
+            for spelling in [keyword, *aliases.get(keyword, [])]:
+                for match in _word_boundary_pattern(spelling).finditer(text):
+                    matches.append((match.start(), match.end(), category, keyword))
+    matches.sort(key=lambda item: (item[0], -(item[1] - item[0])))
     result = {category: [] for category in SKILL_TAXONOMY}
-    for _, category, keyword in kept:
-        result[category].append(keyword)
+    end_of_mention = -1
+    for start, end, category, keyword in matches:
+        if start < end_of_mention:
+            continue
+        end_of_mention = end
+        if keyword not in result[category]:
+            result[category].append(keyword)
     return result
 
 
@@ -517,11 +583,6 @@ def extract_education(text: str) -> tuple:
         if m2:
             branch = m2.group(0)
             break
-    if branch is None:
-        # "B.Tech (CSE)" style
-        m2 = re.search(r"\(([A-Za-z &]{2,20})\)", text)
-        if m2:
-            branch = m2.group(1).strip()
 
     college = None
     m3 = COLLEGE_RE.search(text)
@@ -555,7 +616,12 @@ def extract_education(text: str) -> tuple:
         graduation_year = int(m6.group(1))
         year_conf = 0.80
     else:
-        years = [int(y) for y in YEAR_RE.findall(text)]
+        # Restrict the fallback to education records/date lines, rather than
+        # taking a scholarship expiry or other unrelated number in the block.
+        years = [int(y) for line in text.splitlines()
+                 if DEGREE_RE.search(line) or COLLEGE_RE.search(line)
+                 or DATE_RANGE_RE.fullmatch(line.strip())
+                 for y in YEAR_RE.findall(line)]
         if years:
             # Heuristic: latest year in the education block.
             graduation_year = max(years)
@@ -592,7 +658,8 @@ def _entry_role_company(header_rest: str):
             if len(parts) >= 2:
                 first, second = _clean_part(parts[0]), _clean_part(parts[1])
                 # If the second part looks like a role, it is the role
-                if any(kw in second.lower() for kw in ROLE_KEYWORDS):
+                if (not any(re.search(rf"\b{kw}\b", first, re.IGNORECASE) for kw in ROLE_KEYWORDS)
+                        and any(re.search(rf"\b{kw}\b", second, re.IGNORECASE) for kw in ROLE_KEYWORDS)):
                     return second, first
                 return first, second
 
@@ -603,18 +670,18 @@ def _entry_role_company(header_rest: str):
 def _extract_dated_entries(section_lines):
     """Split a section into dated entries: [{role, company, duration, technologies}].
 
-    Only lines carrying a date range / year start a new entry - we never
-    fabricate entries without evidence of dates.
+    Explicit role headers start entries. A body year or statistic does not.
+    Undated roles keep duration null; a following date line can supply it.
     """
     entries = []
     current = None
 
     for line in section_lines:
-        stripped = line.strip()
+        stripped = _clean_record_text(line)
         if not stripped:
             continue
 
-        date_m = DATE_RANGE_RE.search(stripped)
+        date_m = ENTRY_DATE_RANGE_RE.search(stripped)
         single_year = None
         if not date_m:
             # single-year entry headers like "Intern, Google, 2023"
@@ -622,7 +689,14 @@ def _extract_dated_entries(section_lines):
             if ym and len(stripped) <= 120:
                 single_year = ym.group(0)
 
-        is_header = date_m is not None or single_year is not None
+        has_role = any(re.search(rf"\b{re.escape(kw)}\b", stripped, re.IGNORECASE)
+                       for kw in ROLE_KEYWORDS) or bool(re.search(r'\binternship\b', stripped, re.IGNORECASE))
+        is_body = bool(re.match(r"^(built|developed|implemented|improved|worked|"
+                                r"delivered|led|managed|supported|increased|reduced|"
+                                r"collaborated|assisted|analyzed|designed|created|"
+                                r"maintained|conducted|participated|contributed|compared|optimized)\b",
+                                stripped, re.IGNORECASE))
+        is_header = has_role and not is_body and len(stripped) <= 120
         # A "Technologies:" body line must not start a new entry
         if is_header and re.match(r"^(technologies?|skills?|tools?)\s*[:]",
                                   stripped, re.IGNORECASE):
@@ -636,7 +710,7 @@ def _extract_dated_entries(section_lines):
             if date_m:
                 duration = date_m.group(0)
                 rest = stripped[: date_m.start()] + " " + stripped[date_m.end():]
-            else:
+            elif single_year:
                 duration = single_year
                 rest = stripped.replace(single_year, "", 1)
             role, company = _entry_role_company(rest)
@@ -648,6 +722,8 @@ def _extract_dated_entries(section_lines):
             }
         else:
             if current is not None:
+                if current['duration'] is None and (ENTRY_DATE_RANGE_RE.fullmatch(stripped) or _date_year(stripped)):
+                    current['duration'] = stripped
                 current["body"].append(stripped)
 
     if current is not None:
@@ -677,61 +753,62 @@ def _extract_projects(section_text: str) -> list:
     current = None
     lines = section_text.splitlines()
 
+    def is_tech(text):
+        return bool(re.match(r'^(?:technologies?|tech stack|tools|stack)\s*:', text, re.IGNORECASE))
+
     for i, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
             continue
 
-        is_bullet = bool(re.match(r"^\s*[•\-–—*]", stripped))
-        is_tech_line = stripped.lower().startswith(
-            ("technologies:", "tech stack:", "tools:")
-        )
+        is_bullet = bool(re.match(r"^\s*(?:[\x7f\uf0b7\u0095•\-–—*]|\d+[.)]\s)", stripped))
+        body = _clean_record_text(stripped)
+        is_tech_line = is_tech(body)
 
-        # Bullet with "Title — description" / "Title : description"
+        # Both plain and bullet "Title — description" are explicit titles.
         m = None
-        if is_bullet:
-            body = re.sub(r"^\s*[•\-–—*]\s*", "", stripped)
+        if not is_tech_line:
             m = re.split(r"\s*(?:—|–|:|\|| - )\s*", body, maxsplit=1)
+            # Description bullets are part of the current project, not new
+            # projects. A bare number never becomes a project title.
+            if len(m) < 2 or not _looks_like_project_title(m[0]):
+                m = None
 
-        # Also detect plain-line project titles: short line followed by a
-        # technologies line (or another title / end of section)
+        # Short titles may precede description bullets, not only a tech line.
         is_plain_title = False
-        if not is_bullet and not is_tech_line:
+        if not is_tech_line and _looks_like_project_title(body):
             # Heuristic: reasonable title length, doesn't look like a section header
             if 3 <= len(stripped) <= 80 and not re.match(
                 r"^(projects?|certifications?|achievements?|education|skills?|experience|internships?)\s*:?$",
-                stripped,
+                body,
                 re.IGNORECASE,
             ):
-                # Look ahead: if next non-empty line is a technologies line, this is likely a title
                 next_idx = i + 1
                 while next_idx < len(lines) and not lines[next_idx].strip():
                     next_idx += 1
                 if next_idx < len(lines):
                     next_line = lines[next_idx].strip()
-                    if next_line.lower().startswith(
-                        ("technologies:", "tech stack:", "tools:")
-                    ):
+                    if is_tech(_clean_record_text(next_line)) or not _looks_like_project_title(
+                            _clean_record_text(next_line)) and re.search(r'[A-Za-z]', next_line):
                         is_plain_title = True
 
         if (m and m[0].strip() and len(m[0].strip()) <= 60) or is_plain_title:
             if current is not None:
                 entries.append(current)
-            if is_plain_title:
-                title = stripped
+            if is_plain_title and not m:
+                title = body
                 description = None
             else:
                 title = m[0].strip()
                 description = m[1].strip() if len(m) > 1 and m[1].strip() else None
-            current = {"title": title, "description": description, "body": [stripped]}
+            current = {"title": title, "descriptions": [description] if description else [], "body": [body]}
         else:
             if current is not None:
-                current["body"].append(stripped)
-                if current["description"] is None and not is_tech_line:
-                    current["description"] = stripped
-            elif is_bullet and not is_tech_line:
-                # A bullet without a title marker - start an unnamed entry
-                current = {"title": None, "description": stripped, "body": [stripped]}
+                current["body"].append(body)
+                if not is_tech_line and re.search(r'[A-Za-z]', body) and not re.match(
+                        r'^(?:projects?_count|total|count)\b', body, re.IGNORECASE):
+                    current["descriptions"].append(body)
+            # Unattributed bullets never manufacture unnamed project records.
 
     if current is not None:
         entries.append(current)
@@ -743,10 +820,18 @@ def _extract_projects(section_text: str) -> list:
         technologies = [s for skills in tech.values() for s in skills]
         result.append({
             "project_name": entry["title"],
-            "description": entry["description"],
+            "description": '\n'.join(entry["descriptions"]) or None,
             "technologies": technologies,
         })
     return result
+
+
+def _looks_like_project_title(text):
+    return bool(re.search(r"[A-Za-z]", text) and not re.match(
+        r"^(built|developed|implemented|improved|worked|delivered|reduced|added|"
+        r"increased|achieved|deployed|tested|projects?_count|total|count|"
+        r"completed|participated|contributed|collaborated|assisted|analyzed|"
+        r"designed|created|maintained|conducted|compared|optimized|https?|www)\b", text, re.IGNORECASE))
 
 
 # ------------------------------------------------------------
@@ -754,28 +839,185 @@ def _extract_projects(section_text: str) -> list:
 # ------------------------------------------------------------
 
 
+# "Certifications: 2" / "Certifications" with an optional stated count:
+# a header, not a certification record. The stated count (if any) is
+# ignored rather than used to fabricate records.
+_CERTS_HEADER_RE = re.compile(
+    r"^(certifications?|certificates|credentials)\s*:?\s*\d*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_cert_record(line: str) -> bool:
+    """Honest-extraction filter: is this line plausibly one certification?
+
+    Section context supports listed course certificates, but unrelated course
+    mentions, metadata, bare numbers and descriptive prose are not titles.
+    """
+    if len(line) > 160 or not re.search(r"[A-Za-z]", line):
+        return False          # long-line prose, never a record title
+    # A description clause ("..., including ...", "Participated in ...",
+    # "contributed to ...") is prose, never a record.
+    if re.search(r"\b(including|contributed|participated)\b",
+                 line, re.IGNORECASE):
+        return False
+    if re.match(r"^(?:completed|studied|learned|worked|built|this|these|just|I|we|"
+                r"coursework|courses?|training|testing note|description|"
+                r"projects?_count|cgpa|branch|college_tier|total|count)\b",
+                line, re.IGNORECASE):
+        return False
+    return True
+
+
+# Bullet glyphs that PDF/DOCX extraction sometimes emits as text:
+# DEL (\x7f), Word symbol-font bullet (\uf0b7), PUA round bullet (\u0095).
+_GLYPH_BULLET_CHARS = "\x7f\uf0b7\u0095\u25fb\u25aa\u2794\u27a4"
+
+
+# Ordinary bullet separators plus the glyph-only bullets.
+_BULLET_STRIP_CHARS = " •·-–—*" + _GLYPH_BULLET_CHARS
+
+
+def _clean_record_text(line: str) -> str:
+    """Strip bullet separators AND stray glyph bullets from extraction lines."""
+    return re.sub(r"^\d+[.)]\s+", "", line.strip(_BULLET_STRIP_CHARS)).strip()
+
+
+
+_CERT_METADATA_RE = re.compile(
+    r"^(?P<label>(?:certificate|certification|credential)\s*(?:id|number|no\.?|url|link)|"
+    r"id|url|https?|issuer|issued by|issuing organization|provider|organization|"
+    r"issued|issue date|date issued|date|completed on|completion date|"
+    r"expires?|expiry(?: date)?|expiration(?: date)?|valid(?: until| through)?|status)"
+    r"(?:\s*[:#=\-]\s*|\s+|$)(?P<value>.*)$", re.IGNORECASE)
+_ISSUER_LABELS = {"issuer", "issued by", "issuing organization", "provider", "organization"}
+_ISSUE_LABELS = {"issued", "issue date", "date issued", "date", "completed on", "completion date"}
+_MONTH = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+_KNOWN_ISSUERS = {
+    'amazon', 'amazon web services', 'aws', 'microsoft', 'google', 'google cloud',
+    'ibm', 'oracle', 'cisco', 'meta', 'coursera', 'edx', 'udemy', 'nptel',
+    'linkedin learning', 'freecodecamp', 'hackerrank', 'comptia', 'salesforce',
+}
+
+
+def _date_year(text):
+    """Keep only the stated year of a recognizable, valid date; never guess a date."""
+    value = re.sub(r'\s+', ' ', text.strip().rstrip('.'))
+    value = re.sub(r'\bSept\b', 'Sep', value, flags=re.IGNORECASE)
+    if not re.search(r'\b(?:19|20)\d{2}\b', value):
+        return None
+    for format_ in ('%Y', '%b %Y', '%B %Y', '%b %d, %Y', '%B %d, %Y',
+                    '%b %d %Y', '%B %d %Y', '%d %b %Y', '%d %B %Y',
+                    '%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%d.%m.%Y', '%d-%m-%Y'):
+        try:
+            return datetime.strptime(value, format_).year
+        except ValueError:
+            continue
+    return None
+
+
+def _reliable_issuer(text):
+    value = text.strip(' .').casefold()
+    return value in _KNOWN_ISSUERS or bool(re.fullmatch(
+        r'(?:[\w &.\-]+\s+)?(?:academy|university|institute|inc|corporation|foundation)', value))
+
+
+def _cert_metadata(text):
+    match = _CERT_METADATA_RE.match(text)
+    if match:
+        label = re.sub(r'\s+', ' ', match['label']).lower()
+        value = match['value'].strip()
+        if label in _ISSUER_LABELS:
+            return 'issuer', value or None
+        if label in _ISSUE_LABELS:
+            return 'year', _date_year(value)
+        return 'ignore', None
+    if text.strip(' .').casefold() in _KNOWN_ISSUERS:
+        return 'issuer', text.strip()
+    if URL_RE.fullmatch(text.rstrip('.,;')) or _date_year(text) is not None:
+        return ('year', _date_year(text)) if _date_year(text) is not None else ('ignore', None)
+    return None
+
+
 def _extract_certifications(section_text: str) -> list:
+    """Keep titles and attach reliable metadata; preserve name/issuer/year API."""
     result = []
+    current = None
     for line in section_text.splitlines():
-        stripped = line.strip(" •·-–—*")
-        if not stripped:
+        text = _clean_record_text(line)
+        if not text:
             continue
-        if re.match(r"^(certifications?|certificates|credentials)\s*:?$",
-                    stripped, re.IGNORECASE):
+        heading = _section_heading(text)
+        if heading:
+            if heading == 'certifications':
+                continue
+            break
+        metadata = _cert_metadata(text)
+        if metadata:
+            for part in re.split(r'\s*\|\s*|\s+[–—]\s+', text):
+                item = _cert_metadata(part)
+                if item:
+                    key, value = item
+                    if current is not None and key != 'ignore' and value is not None and current[key] is None:
+                        current[key] = value
             continue
-        year = None
-        ym = YEAR_RE.search(stripped)
-        if ym:
-            year = int(ym.group(0))
-        rest = re.sub(r"\b20\d{2}\b", " ", stripped)
-        rest = re.sub(r"\s+", " ", rest).strip(" ,|•·-–—")
-        if not rest:
+        if not _looks_like_cert_record(text):
+            current = None
             continue
-        parts = [p.strip() for p in re.split(r"\s*(?:—|–|\||,)\s*", rest) if p.strip()]
-        name = parts[0]
-        issuer = parts[1] if len(parts) > 1 else None
-        result.append({"name": name, "issuer": issuer, "year": year})
-    return result
+
+        # Retain separators inside names (e.g. "Architect - Associate").
+        # Split comma layouts only after recognizing metadata or an issuer.
+        # A complete labelled date stays together even when it contains commas.
+        pieces = re.split(r'(\s*(?:—|–|\|| - )\s*)', text)
+        parts = []
+        for index in range(0, len(pieces), 2):
+            part = pieces[index]
+            separator = pieces[index - 1] if index else ''
+            if _cert_metadata(part.strip()):
+                parts.append((separator, part.strip()))
+            else:
+                comma_parts = re.split(r'(,\s*)', part)
+                for offset in range(0, len(comma_parts), 2):
+                    parts.append((comma_parts[offset - 1] if offset else separator,
+                                  comma_parts[offset].strip()))
+        record = {'name': '', 'issuer': None, 'year': None}
+        for separator, part in parts:
+            meta = _cert_metadata(part)
+            if meta:
+                key, value = meta
+                if key != 'ignore' and value is not None and record[key] is None:
+                    record[key] = value
+                continue
+            # Existing compact layout: "Title, Amazon 2023" or "Title 2023".
+            tail = re.search(rf"\s+((?:{_MONTH}\s+)?20\d{{2}})\.?$", part, re.IGNORECASE)
+            if tail:
+                record['year'] = record['year'] or _date_year(tail[1])
+                part = part[:tail.start()].rstrip()
+            if record['name'] and record['issuer'] is None and _reliable_issuer(part):
+                record['issuer'] = part
+            elif part:
+                record['name'] += (separator if record['name'] else '') + part
+        if not record['name'] or _cert_metadata(record['name']):
+            current = None
+            continue
+        current = record
+        result.append(record)
+
+    unique = []
+    def title_key(value):
+        return re.sub(r"\s+", " ", value).strip(' .;').casefold()
+    for record in result:
+        previous = next((entry for entry in unique if title_key(entry['name']) == title_key(record['name'])
+            and all(entry[key] is None or record[key] is None or
+                    str(entry[key]).casefold() == str(record[key]).casefold()
+                    for key in ('issuer', 'year'))), None)
+        if previous is None:
+            unique.append(record)
+        else:
+            for key in ('issuer', 'year'):
+                if previous[key] is None:
+                    previous[key] = record[key]
+    return unique
 
 
 # ------------------------------------------------------------
@@ -786,7 +1028,7 @@ def _extract_certifications(section_text: str) -> list:
 def _extract_achievements(section_text: str) -> dict:
     hackathons, awards, coding = [], [], []
     for line in section_text.splitlines():
-        stripped = line.strip(" •·-–—*")
+        stripped = _clean_record_text(line)
         if not stripped:
             continue
         lowered = stripped.lower()
@@ -801,6 +1043,15 @@ def _extract_achievements(section_text: str) -> dict:
         "awards": awards,
         "coding_achievements": coding,
     }
+
+
+def _activity_lines(section_text):
+    # Retain literal reviewable descriptions, never turn a stated number
+    # into that many invented records or ML scores/counts.
+    return list(dict.fromkeys(text for line in section_text.splitlines()
+        if (text := _clean_record_text(line)) and re.search(r"[A-Za-z]", text)
+        and not _section_heading(text) and not _cert_metadata(text)
+        and not re.fullmatch(r"[\w -]+:\s*\d+", text)))
 
 
 # ------------------------------------------------------------
@@ -830,28 +1081,35 @@ def parse_resume(raw_text: str):
     linkedin, github, portfolio = extract_links(raw_text)
 
     # --- Education -------------------------------------------------
-    edu_text = _section_text(lines, sections["education"]) if "education" in sections else raw_text
+    edu_text = _section_text(lines, sections["education"]) if "education" in sections else '\n'.join(
+        line for line in header_lines if DEGREE_RE.search(line) or COLLEGE_RE.search(line)
+        or CGPA_KEYWORD_RE.search(line) or GRAD_YEAR_EXPLICIT_RE.search(line))
     degree, branch, college, cgpa, grad_year, cgpa_conf, year_conf = extract_education(edu_text)
 
     # --- Skills ----------------------------------------------------
-    skills_text = _section_text(lines, sections["skills"]) if "skills" in sections else raw_text
+    skills_text = '\n'.join(line for block in _section_blocks(lines, 'skills') for line in block) if "skills" in sections else '\n'.join(
+        line for line in header_lines if re.match(
+            r"^\s*(?:technical skills|skills|programming languages|technologies|tech stack)\s*:",
+            line, re.IGNORECASE))
     skills = scan_skills(skills_text)
 
     # --- Experience / Internships ----------------------------------
     experience = []
-    if "experience" in sections:
-        sec_lines = lines[sections["experience"][0] + 1: sections["experience"][1]]
-        experience = _extract_dated_entries(sec_lines)
-
     internships = []
-    if "internships" in sections:
-        sec_lines = lines[sections["internships"][0] + 1: sections["internships"][1]]
-        internships = _extract_dated_entries(sec_lines)
+    for section in ('experience', 'internships'):
+        for block in _section_blocks(lines, section):
+            for entry in _extract_dated_entries(block):
+                # An explicit internship role wins over a generic Experience heading.
+                # Otherwise retain the resume's declared section; never infer employment.
+                bucket = internships if section == 'internships' or re.search(
+                    r'\bintern(?:ship)?\b', entry.get('role') or '', re.IGNORECASE) else experience
+                if entry not in bucket:
+                    bucket.append(entry)
 
     # --- Projects ---------------------------------------------------
     projects = []
-    if "projects" in sections:
-        projects = _extract_projects(_section_text(lines, sections["projects"]))
+    for block in _section_blocks(lines, 'projects'):
+        projects.extend(_extract_projects('\n'.join(block)))
 
     # --- Certifications ---------------------------------------------
     certifications = []
@@ -866,6 +1124,36 @@ def parse_resume(raw_text: str):
         achievements = _extract_achievements(
             _section_text(lines, sections["achievements"])
         )
+
+    # Hackathon / open-source sections are recognized headings; lines with
+    # an explicitly stated hackathon contribution move into the
+    # achievements buckets rather than silently disappearing. Never
+    # invented - only lines actually present in the resume are kept.
+    for extra in ("hackathons", "open_source"):
+        if extra in sections:
+            extra_hits = _extract_achievements(_section_text(lines, sections[extra]))
+            for bucket in achievements:
+                for line_ in extra_hits[bucket]:
+                    if line_ not in achievements[bucket]:
+                        achievements[bucket].append(line_)
+
+    if 'hackathons' in sections:
+        for text in _activity_lines(_section_text(lines, sections['hackathons'])):
+            if re.search(r'open[ -]source|contribut', text, re.IGNORECASE):
+                continue
+            if text not in achievements['hackathons']:
+                achievements['hackathons'].append(text)
+    achievements['open_source_contributions'] = []
+    achievements['extracurriculars'] = []
+    for section, bucket in [('open_source', 'open_source_contributions'),
+                            ('extracurriculars', 'extracurriculars')]:
+        if section in sections:
+            achievements[bucket] = _activity_lines(_section_text(lines, sections[section]))
+    if 'hackathons' in sections:
+        achievements['open_source_contributions'].extend(text for text in
+            _activity_lines(_section_text(lines, sections['hackathons']))
+            if re.search(r'open[ -]source|contribut', text, re.IGNORECASE)
+            and text not in achievements['open_source_contributions'])
 
     profile = {
         "name": name,

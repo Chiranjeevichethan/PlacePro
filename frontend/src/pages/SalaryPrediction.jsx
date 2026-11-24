@@ -2,23 +2,30 @@
  * Salary Prediction page (Phase 5C).
  *
  * REAL BACKEND FEATURE: the estimate comes from POST /api/salary-predict
- * (Ridge regression model "placepro-salary-v1", trained on PLACED students
+ * (Ridge regression model "placepro-salary-v2", trained on PLACED students
  * only) via services/salaryPrediction.js. The backend response is
  * authoritative: no salary value, range, confidence, or factor weight is
  * computed, substituted, or hard-coded in the frontend.
  *
- * The form collects exactly the 16 model inputs and is PREFILLED from the
- * existing student profile (localStorage "placepro_profile" via useProfile).
- * Edits here stay LOCAL to this page and never write back to the main
- * profile - no second profile system is created.
+ * The form collects the model inputs (everything except college tier) and is
+ * PREFILLED from the ONE canonical student profile (the shared
+ * StudentProfileContext fed by GET /api/profile/{id}) - the same source the
+ * Placement Prediction page uses. A known profile college tier is retained;
+ * missing tier uses the backend fallback. Edits here stay LOCAL and never write
+ * back to the main profile - no second profile system is created.
  *
  * The salary estimate is conditional on placement: the page labels it as an
  * estimate and states that it is not a guaranteed offer.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { predictSalary, formatLpa } from "../services/salaryPrediction";
-import { BRANCH_OPTIONS, TIER_OPTIONS } from "../services/profileConfig";
-import useProfile from "../hooks/useProfile";
+import ModelExplanation from '../components/ModelExplanation';
+import {
+  BRANCH_OPTIONS,
+  buildSalaryDraftFromProfile,
+} from "../services/profileConfig";
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { usePredictionResult } from '../hooks/usePredictionResult';
 
 /**
  * Numeric model inputs with the sanity bounds mirrored from the profile
@@ -42,38 +49,57 @@ const NUMERIC_FIELDS = [
   { name: "extracurriculars", label: "Extracurricular Activities (0 - 3)", min: 0, max: 3, step: "1", placeholder: "0 - 3" },
 ];
 
-/** Prefill the 16 model inputs from the flat student profile mirror. */
-const buildInitialForm = (profile) => ({
-  branch: profile.branch || "",
-  collegeTier: profile.collegeTier || "",
-  cgpa: profile.cgpa || "",
-  backlogs: profile.backlogs || "",
-  codingSkills: profile.codingSkills || "",
-  dsaScore: profile.dsaScore || "",
-  aptitudeScore: profile.aptitudeScore || "",
-  communicationSkills: profile.communicationSkills || "",
-  mlKnowledge: profile.mlKnowledge || "",
-  systemDesign: profile.systemDesign || "",
-  internships: profile.internshipsCount
-    ? String(profile.internshipsCount)
-    : "",
-  projects: profile.projectsCount ? String(profile.projectsCount) : "",
-  certifications: profile.certificationsCount
-    ? String(profile.certificationsCount)
-    : "",
-  hackathons: profile.hackathonsCount ? String(profile.hackathonsCount) : "",
-  openSourceContributions: profile.openSourceContributions || "",
-  extracurriculars: profile.extracurriculars || "",
-});
+const EMPTY_FORM = {
+  branch: "",
+  cgpa: "",
+  backlogs: "",
+  codingSkills: "",
+  dsaScore: "",
+  aptitudeScore: "",
+  communicationSkills: "",
+  mlKnowledge: "",
+  systemDesign: "",
+  internships: "",
+  projects: "",
+  certifications: "",
+  hackathons: "",
+  openSourceContributions: "",
+  extracurriculars: "",
+};
 
 function SalaryPrediction() {
-  const profile = useProfile();
+  const { profile, profileKey, loading, error: profileError } = useStudentProfileContext();
 
-  const [form, setForm] = useState(() => buildInitialForm(profile));
   const [errors, setErrors] = useState({});
-  const [result, setResult] = useState(null);
-  const [isEstimating, setIsEstimating] = useState(false);
-  const [error, setError] = useState(null);
+
+  /* Prefill from the shared profile. The local form is stamped with the
+     profile signature it was edited against, so a newer canonical profile
+     (resume verified or profile saved) always wins over stale local state,
+     while in-page edits survive until then. Empty profile fields are
+     skipped, so they never erase what the student typed here. */
+  const profilePrefill = useMemo(
+    () => buildSalaryDraftFromProfile(profile),
+    [profile]
+  );
+  const profileSignature = useMemo(
+    () => JSON.stringify([profileKey, profilePrefill]),
+    [profileKey, profilePrefill]
+  );
+  const [formState, setFormState] = useState({
+    signature: null,
+    values: EMPTY_FORM,
+  });
+
+  const form =
+    formState.signature === profileSignature
+      ? formState.values
+      : { ...EMPTY_FORM, ...profilePrefill };
+  const { result, busy: isEstimating, error, run } = usePredictionResult(profileKey, form, predictSalary);
+
+  const setForm = (update) => {
+    const values = typeof update === "function" ? update(form) : update;
+    setFormState({ signature: profileSignature, values });
+  };
 
   /* The stored profile usually holds a canonical branch ("CSE"), but older
      mirrors may hold a legacy spelling ("Information Science and
@@ -83,11 +109,6 @@ function SalaryPrediction() {
       ? [{ value: form.branch, label: form.branch }, ...BRANCH_OPTIONS]
       : BRANCH_OPTIONS;
 
-  const tierOptions =
-    form.collegeTier && !TIER_OPTIONS.some((option) => option.value === form.collegeTier)
-      ? [{ value: form.collegeTier, label: form.collegeTier }, ...TIER_OPTIONS]
-      : TIER_OPTIONS;
-
   const setField = (name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
     setErrors((prev) => {
@@ -96,8 +117,6 @@ function SalaryPrediction() {
       delete next[name];
       return next;
     });
-    // A changed input invalidates the previous failed attempt's message.
-    setError(null);
   };
 
   const validate = (data) => {
@@ -105,9 +124,6 @@ function SalaryPrediction() {
 
     if (!data.branch) {
       next.branch = "Please select a branch.";
-    }
-    if (!data.collegeTier) {
-      next.collegeTier = "Please select a college tier.";
     }
 
     NUMERIC_FIELDS.forEach(({ name, label, min, max }) => {
@@ -120,6 +136,9 @@ function SalaryPrediction() {
         next[name] = `${label.replace(/\s*\(.*\)$/, "")} must be ${min} or greater.`;
       } else if (max !== undefined && value > max) {
         next[name] = `${label.replace(/\s*\(.*\)$/, "")} must be ${min} - ${max}.`;
+      } else if (['backlogs', 'internships', 'projects', 'certifications', 'hackathons',
+        'openSourceContributions', 'extracurriculars'].includes(name) && !Number.isInteger(value)) {
+        next[name] = `${label.replace(/\s*\(.*\)$/, "")} must be a whole number.`;
       }
     });
 
@@ -127,8 +146,7 @@ function SalaryPrediction() {
   };
 
   const runPrediction = async () => {
-    setError(null);
-    setResult(null);
+    if (loading || profileError) return;
 
     const next = validate(form);
     if (Object.keys(next).length > 0) {
@@ -136,19 +154,8 @@ function SalaryPrediction() {
       return;
     }
 
-    setIsEstimating(true);
-    try {
-      const estimate = await predictSalary(form);
-      setResult(estimate);
-    } catch (err) {
-      // Backend error messages are user-readable (422/503/500/network).
-      setError(
-        err?.message ??
-          "Unable to calculate the salary estimate. Please try again."
-      );
-    } finally {
-      setIsEstimating(false);
-    }
+    setErrors({});
+    await run(form);
   };
 
   const handleSubmit = (event) => {
@@ -215,8 +222,9 @@ function SalaryPrediction() {
       <div className="page-header">
         <h1>Salary Prediction</h1>
         <p>
-          Estimate your potential salary based on your academic profile and
-          technical skills.
+          {profile?.name
+            ? `Prefilled from ${profile.name}'s shared Student Profile.`
+            : "Estimate your potential salary based on your academic profile and technical skills."}
         </p>
       </div>
 
@@ -227,11 +235,16 @@ function SalaryPrediction() {
           Prefilled from your Student Profile. Changes here are used only for
           this estimate and do not modify your profile.
         </p>
+        <p className="form-description">
+          {form.collegeTier ? `College tier from your profile: ${form.collegeTier}.`
+            : 'College tier is missing; this estimate uses the backend default.'}
+        </p>
 
-        <form onSubmit={handleSubmit} noValidate>
+        {loading ? <p>Loading student profile...</p> : profileError ? (
+          <p className="error-banner" role="alert">{profileError}</p>
+        ) : <form onSubmit={handleSubmit} noValidate>
           <div className="salary-form-grid">
             {renderSelect("branch", "Branch", branchOptions)}
-            {renderSelect("collegeTier", "College Tier", tierOptions)}
             {NUMERIC_FIELDS.map(renderNumberField)}
           </div>
 
@@ -253,7 +266,7 @@ function SalaryPrediction() {
               {isEstimating ? "ESTIMATING..." : "ESTIMATE SALARY"}
             </span>
           </button>
-        </form>
+        </form>}
       </div>
 
       {/* ERROR + RETRY */}
@@ -280,8 +293,9 @@ function SalaryPrediction() {
         </div>
       )}
 
+      <ModelExplanation kind="salary" />
       {/* RESULT CARD */}
-      {result && !isEstimating && (
+      {result && !isEstimating && !loading && !profileError && (
         <div className="prediction-result salary-result">
           <h2>Estimated Salary</h2>
 
@@ -311,7 +325,7 @@ function SalaryPrediction() {
             </div>
 
             <p className="prediction-data-note">
-              Estimated salary based on your current profile. Actual offers may
+              Estimated salary based on the submitted form values. Changing the inputs requires a new estimate. Actual offers may
               vary. The salary estimate is conditional on placement and is not
               a guaranteed offer.
             </p>

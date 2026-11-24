@@ -26,19 +26,16 @@
 #   INCOMPLETE    no mandatory FAIL, but >=1 mandatory UNKNOWN
 #
 # REUSE (no duplicate implementations):
-#   - Skill normalization + verified skills come from Phase 12
-#     (readiness_service.collect_verified_skills + skill_taxonomy).
+#   - Skill sufficiency comes from the shared skill_evidence policy.
 #   - cgpa / branch / counts / backlogs / aptitude come from the
 #     Phase 10 ML-feature mapping (ml_feature_mapping).
 #
 # ============================================================
 
-import re
-
 from .company_store import get_active_companies, get_company  # Phase 28C store
 from .ml_feature_mapping import map_profile_to_ml_features
 from .profile_service import ProfileNotFoundError, get_profile
-from .readiness_service import collect_verified_skills
+from .skill_evidence import resolve_skill_evidence, skill_status
 
 # ------------------------------------------------------------
 # ERRORS
@@ -167,43 +164,39 @@ _SKILL_ACTION = (
 )
 
 
-def _check_required_skills(req, present_skills):
-    required = req.get("required_skills") or []
-    results = []
-    for skill in required:
-        if skill in present_skills:
-            results.append(_result(
-                f"Required skill: {skill}", skill, skill, "PASS",
-                f"Required skill '{skill}' is present in the verified profile.",
-            ))
+def _check_skill(skill, evidence, mandatory):
+    label = "Required" if mandatory else "Preferred"
+    status = skill_status(evidence, skill)
+    info = evidence["skills"].get(skill, {})
+    if status == "SATISFIED":
+        result = _result(f"{label} skill: {skill}", skill, skill, "PASS",
+                         f"{label} skill '{skill}' has qualifying confirmed profile or assessment evidence.",
+                         mandatory=mandatory)
+    else:
+        if status == "INSUFFICIENT":
+            explanation = (
+                f"Latest verified PlacePro assessment for '{skill}' scored {info.get('score')}, "
+                "below PlacePro's evidence threshold of 60; this skill requirement cannot be confirmed."
+            )
+        elif status == "MISSING":
+            explanation = f"{label} skill '{skill}' was not found in the verified profile or assessment evidence."
+        elif status == "INVALID":
+            explanation = f"Recorded assessment evidence for '{skill}' has an invalid score or source."
         else:
-            results.append(_result(
-                f"Required skill: {skill}", None, skill, "UNKNOWN",
-                f"Required skill '{skill}' was not found in the verified "
-                "profile.",
-                action=_SKILL_ACTION.format(skill=skill),
-            ))
-    return results
+            explanation = f"Recorded skill evidence for '{skill}' has not been confirmed."
+        result = _result(f"{label} skill: {skill}", info.get("score"), skill, "UNKNOWN",
+                         explanation, mandatory=mandatory,
+                         action=_SKILL_ACTION.format(skill=skill) if mandatory else None)
+    result["evidence_status"] = status
+    return result
 
 
-def _check_preferred_skills(req, present_skills):
-    preferred = req.get("preferred_skills") or []
-    results = []
-    for skill in preferred:
-        if skill in present_skills:
-            results.append(_result(
-                f"Preferred skill: {skill}", skill, skill, "PASS",
-                f"Preferred skill '{skill}' is present in the verified profile.",
-                mandatory=False,
-            ))
-        else:
-            results.append(_result(
-                f"Preferred skill: {skill}", None, skill, "UNKNOWN",
-                f"Preferred skill '{skill}' was not found in the verified "
-                "profile (not mandatory).",
-                mandatory=False,
-            ))
-    return results
+def _check_required_skills(req, evidence):
+    return [_check_skill(skill, evidence, True) for skill in req.get("required_skills") or []]
+
+
+def _check_preferred_skills(req, evidence):
+    return [_check_skill(skill, evidence, False) for skill in req.get("preferred_skills") or []]
 
 
 # ------------------------------------------------------------
@@ -211,7 +204,7 @@ def _check_preferred_skills(req, present_skills):
 # ------------------------------------------------------------
 
 
-def _student_data(profile):
+def _student_data(profile, evidence=None):
     """Gather the student values used by eligibility checks.
 
     Reuses the Phase 10 ML-feature mapping (single source of truth
@@ -229,17 +222,18 @@ def _student_data(profile):
         "certifications": mapping.get("certifications"),
         "aptitude": mapping.get("aptitude_score"),
         "graduation_year": education.get("graduation_year"),
-        "skills": {e["skill"] for e in collect_verified_skills(profile)},
+        "evidence": evidence or resolve_skill_evidence(profile),
     }
 
 
-def evaluate_company_eligibility(profile: dict, company: dict) -> dict:
+def evaluate_company_eligibility(profile: dict, company: dict, evidence=None) -> dict:
     """Evaluate one student profile against one company.
 
     Returns the full transparent eligibility result (never uses ML
     placement probability).
     """
-    data = _student_data(profile)
+    _require_verified(profile)
+    data = _student_data(profile, evidence)
     req = company.get("requirements") or {}
 
     results = []
@@ -280,8 +274,8 @@ def evaluate_company_eligibility(profile: dict, company: dict) -> dict:
                 status, explanation,
             ))
 
-    results.extend(_check_required_skills(req, data["skills"]))
-    results.extend(_check_preferred_skills(req, data["skills"]))
+    results.extend(_check_required_skills(req, data["evidence"]))
+    results.extend(_check_preferred_skills(req, data["evidence"]))
 
     mandatory_failed = [
         r for r in results
@@ -363,7 +357,7 @@ def _build_explanation(status, company_name, results, failed, unknown):
         )
         lines.append(
             "Eligibility cannot be confirmed because the following "
-            "required information is missing: "
+            "required information is missing or its evidence cannot be confirmed: "
             + ", ".join(unknown_labels)
             + "."
         )
@@ -416,19 +410,20 @@ def _require_verified(profile) -> None:
         )
 
 
-def get_eligibility(profile_id: str, company_id: str) -> dict:
+def get_eligibility(profile_id: str, company_id: str, *, snapshot=None) -> dict:
     """Eligibility of a verified profile against one company."""
-    profile, _ = get_profile(profile_id)  # raises ProfileNotFoundError
+    profile = snapshot if snapshot is not None else get_profile(profile_id)[0]
     _require_verified(profile)
     company = get_company(company_id)
     if company is None:
         raise CompanyNotFoundError(f"Company '{company_id}' not found.")
-    return evaluate_company_eligibility(profile, company)
+    return {**evaluate_company_eligibility(profile, company),
+            'profile_id': profile_id, 'source_revision': profile.get('revision', 0)}
 
 
-def get_all_eligibility(profile_id: str) -> dict:
+def get_all_eligibility(profile_id: str, *, snapshot=None) -> dict:
     """Eligibility of a verified profile against ALL active companies."""
-    profile, _ = get_profile(profile_id)
+    profile = snapshot if snapshot is not None else get_profile(profile_id)[0]
     _require_verified(profile)
 
     grouped = {"eligible": [], "not_eligible": [], "incomplete": []}
@@ -450,4 +445,4 @@ def get_all_eligibility(profile_id: str) -> dict:
         key = result["status"].lower()
         grouped[key].append(summary)
 
-    return grouped
+    return {**grouped, 'profile_id': profile_id, 'source_revision': profile.get('revision', 0)}

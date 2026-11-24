@@ -104,6 +104,7 @@ SKILL_ALIASES = {
     "html5": "HTML",
     "css": "CSS",
     "css3": "CSS",
+    "html/css": ["HTML", "CSS"],  # existing combined assessment bank
     "react": "React",
     "reactjs": "React",
     "react.js": "React",

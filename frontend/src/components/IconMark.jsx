@@ -254,6 +254,12 @@ const icons = {
       <path d="M18 12h.01" />
     </>
   ),
+  notifications: (
+    <>
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M10 21a2 2 0 0 0 4 0" />
+    </>
+  ),
   // clipboard with checkmark / mock test
   mocktest: (
     <>
@@ -296,6 +302,7 @@ const labels = {
   company: "CO",
   learning: "LR",
   salary: "SAL",
+  notifications: "NT",
   mocktest: "MT",
 };
 

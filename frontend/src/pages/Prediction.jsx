@@ -1,29 +1,18 @@
-import { useState } from "react";
 import StudentForm from "../components/StudentForm";
 import RecommendationPanel from "../components/RecommendationPanel";
+import ModelExplanation from '../components/ModelExplanation';
 import { predictPlacement } from "../services/api";
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { usePredictionResult } from '../hooks/usePredictionResult';
 
 function Prediction({ onNavigate, draft, onDraftChange }) {
-  const [prediction, setPrediction] = useState(null);
-  const [isPredicting, setIsPredicting] = useState(false);
-  const [error, setError] = useState(null);
+  /* The shared profile supplies the prefill (App.jsx merges it into the
+     draft) and the student name shown here. */
+  const { profile, profileKey, loading, error: profileError } = useStudentProfileContext();
+  const { result: prediction, busy: isPredicting, error, run } = usePredictionResult(profileKey, draft, predictPlacement);
 
   const handlePrediction = async (formData) => {
-    setError(null);
-    setPrediction(null);
-    setIsPredicting(true);
-
-    try {
-      const result = await predictPlacement(formData);
-      setPrediction(result);
-    } catch (err) {
-      setError(
-        err?.message ??
-          "Something went wrong while generating the prediction. Please try again."
-      );
-    } finally {
-      setIsPredicting(false);
-    }
+    if (!loading && !profileError) await run(formData);
   };
 
   return (
@@ -35,8 +24,9 @@ function Prediction({ onNavigate, draft, onDraftChange }) {
         <h1>Placement Prediction</h1>
 
         <p>
-          Enter the student's information to predict their placement
-          probability.
+          {profile?.name
+            ? `Prefilled from ${profile.name}'s shared Student Profile - complete any missing fields below.`
+            : "Enter the student's information to predict their placement probability."}
         </p>
       </div>
 
@@ -50,12 +40,14 @@ function Prediction({ onNavigate, draft, onDraftChange }) {
           Enter accurate academic, technical, and personal information.
         </p>
 
-        <StudentForm
+        {loading ? <p>Loading student profile...</p> : profileError ? (
+          <p className="error-banner" role="alert">{profileError}</p>
+        ) : <StudentForm
           onPredict={handlePrediction}
           isSubmitting={isPredicting}
           draft={draft}
           onDraftChange={onDraftChange}
-        />
+        />}
       </div>
 
       {/* =========================================
@@ -84,10 +76,11 @@ function Prediction({ onNavigate, draft, onDraftChange }) {
       {/* =========================================
           PREDICTION RESULT
           ========================================= */}
-      {prediction && !isPredicting && (
+      {prediction && !isPredicting && !loading && !profileError && (
         <>
           <div className="prediction-result">
             <h2>Placement Prediction</h2>
+            <p>Based on the submitted form values. Changes to those values require a new prediction.</p>
 
             <div className="result-body">
               {/* STATUS */}
@@ -128,7 +121,7 @@ function Prediction({ onNavigate, draft, onDraftChange }) {
                 </div>
 
                 <div className="prediction-probability-label">
-                  Confidence
+                  Model class confidence
                 </div>
               </div>
 
@@ -172,6 +165,7 @@ function Prediction({ onNavigate, draft, onDraftChange }) {
           {/* =========================================
               PLACEPRO INSIGHTS / RECOMMENDATIONS
               ========================================= */}
+          <ModelExplanation kind="placement" />
           <RecommendationPanel
             prediction={prediction}
             onNavigate={onNavigate}

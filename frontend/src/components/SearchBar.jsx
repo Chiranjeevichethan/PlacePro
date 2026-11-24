@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import { appHrefForPage, handleAppLinkClick } from "../services/appRoutes.js";
 
 const SEARCH_PAGES = [
   {
     page: "dashboard",
     label: "Dashboard",
     keywords: "home overview analytics kpi statistics",
+  },
+  {
+    page: "readiness",
+    label: "Career Readiness",
+    keywords: "career prepare improvement plan profile completeness skills assessment",
+  },
+  {
+    page: "goals",
+    label: "Goals & Milestones",
+    keywords: "goal goals milestone deadline target",
   },
   {
     page: "prediction",
@@ -35,6 +46,11 @@ const SEARCH_PAGES = [
     page: "profile",
     label: "Student Profile",
     keywords: "profile student edit details",
+  },
+  {
+    page: "resume",
+    label: "Resume Builder",
+    keywords: "resume cv create edit export pdf portfolio",
   },
   {
     page: "performance",
@@ -85,7 +101,7 @@ function ArrowIcon() {
   );
 }
 
-function SearchBar({ onNavigate }) {
+function SearchBar({ currentPage, onNavigate }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -134,24 +150,14 @@ function SearchBar({ onNavigate }) {
       return;
     }
 
-    if (!showDropdown) {
-      if ((event.key === "ArrowDown" || event.key === "Enter") && trimmed) {
-        event.preventDefault();
-        setOpen(true);
-        setActiveIndex(0);
-      }
+    if (!showDropdown && event.key === "Enter" && trimmed) {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex(0);
       return;
     }
 
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((index) => (index + 1) % results.length);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex(
-        (index) => (index - 1 + results.length) % results.length
-      );
-    } else if (event.key === "Enter") {
+    if (showDropdown && event.key === "Enter") {
       event.preventDefault();
       if (results.length > 0) {
         const target = results[activeIndex >= 0 ? activeIndex : 0];
@@ -178,9 +184,12 @@ function SearchBar({ onNavigate }) {
       <div className="search-bar">
         <SearchIcon />
 
+        <label className="visually-hidden" htmlFor="placepro-page-search">Search PlacePro pages</label>
         <input
+          id="placepro-page-search"
           className="search-input"
-          type="text"
+          type="search"
+          name="page-search"
           placeholder="Search pages..."
           value={query}
           onChange={(event) => {
@@ -190,15 +199,6 @@ function SearchBar({ onNavigate }) {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
-          role="combobox"
-          aria-label="Search PlacePro pages"
-          aria-expanded={showDropdown}
-          aria-controls="placepro-search-results"
-          aria-activedescendant={
-            showDropdown && activeIndex >= 0
-              ? `search-result-${activeIndex}`
-              : undefined
-          }
           autoComplete="off"
         />
 
@@ -206,34 +206,31 @@ function SearchBar({ onNavigate }) {
           <ul
             className="search-results"
             id="placepro-search-results"
-            role="listbox"
             aria-label="Search results"
           >
             {results.length > 0 ? (
               results.map((item, index) => (
                 <li
                   key={item.page}
-                  role="option"
-                  aria-selected={index === activeIndex}
-                  id={`search-result-${index}`}
                 >
-                  <button
-                    type="button"
+                  <a
+                    href={appHrefForPage(item.page)}
                     className={`search-result-item ${
                       index === activeIndex ? "active" : ""
                     }`}
+                    aria-current={currentPage === item.page ? "page" : undefined}
                     onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => selectPage(item.page)}
+                    onClick={(event) => handleAppLinkClick(event, item.page, selectPage)}
                   >
                     <span className="search-result-icon" aria-hidden="true">
                       <ArrowIcon />
                     </span>
                     <span className="search-result-label">{item.label}</span>
-                  </button>
+                  </a>
                 </li>
               ))
             ) : (
-              <li className="search-empty" role="option" aria-disabled="true">
+              <li className="search-empty">
                 No results found
               </li>
             )}

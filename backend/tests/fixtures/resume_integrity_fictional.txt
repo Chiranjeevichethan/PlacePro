@@ -1,0 +1,39 @@
+Fictional Regression Candidate
+regression-candidate@resume-fixtures.example.test
+FICTIONAL TEST DATA ONLY - authored for PLACE PRO on 2026-11-25.
+All people, organizations and activities below are invented regression data.
+Fixed parser labels are assertion tokens, not real qualifications or career history.
+
+EDUCATION
+B.Tech Computer Science, Fictional Orbit College, 2022-2025
+CGPA: 7.2/10
+
+SKILLS
+Python, SQL
+
+PROJECTS (1)
+Weather Dashboard
+Technologies: Python, SQL
+- Rendered imaginary moon readings in a sandbox-only heat grid.
+
+INTERNSHIPS
+Simulation Intern at Fictional Orbit Workshop, 2022
+- Tested invented orbit-table queries against generated sandbox records.
+
+CERTIFICATIONS
+AWS CERTIFIED CLOUD PRACTITIONER.
+Issuer: Amazon Web Services
+Issued: September 2024
+Certificate ID: FICTIONAL-CERT-ONLY
+Credential URL: https://fixture-certs.example.test/no-issued-credential
+SQL Practice Fundamentals. | Fictional Orbit Academy | 2022
+SQL PRACTICE FUNDAMENTALS | Fictional Orbit Academy | 2022
+
+HACKATHONS
+CodeFest 2024 - Finalist, weather prototype
+
+OPEN-SOURCE CONTRIBUTIONS
+Published a fictional documentation patch for an invented orbital toy library.
+
+EXTRACURRICULAR ACTIVITIES
+Volunteer, college technical festival

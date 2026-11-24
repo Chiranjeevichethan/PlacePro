@@ -62,6 +62,8 @@ class Achievements(BaseModel):
     hackathons: List[str] = Field(default_factory=list)
     awards: List[str] = Field(default_factory=list)
     coding_achievements: List[str] = Field(default_factory=list)
+    open_source_contributions: List[str] = Field(default_factory=list)
+    extracurriculars: List[str] = Field(default_factory=list)
 
 
 class ExtractedProfile(BaseModel):

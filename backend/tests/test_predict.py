@@ -2,20 +2,18 @@
 # PLACEPRO - PHASE 8 - PREDICTION API SMOKE TEST
 # ============================================================
 #
-# Plain-python test (no pytest / httpx required):
+# Run through pytest (the script entry point uses the same fixtures):
 #   python backend/tests/test_predict.py
 #
 # 1. Service-level: predict a sample student, validate schema.
-# 2. HTTP-level: POST to a running server (skips gracefully if
-#    the server is not up) and validate the JSON contract.
+# 2. HTTP-level: validate the JSON contract on the isolated test server.
 #
 # ============================================================
 
-import json
 import os
 import sys
-import urllib.error
-import urllib.request
+
+import pytest
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -45,7 +43,7 @@ SAMPLE_STUDENT = {
     "extracurriculars": 1,
 }
 
-API_URL = os.environ.get("PLACEPRO_API_URL", "http://127.0.0.1:8000")
+from backend.tests.support import http_post_json
 
 
 def validate_response(result, label):
@@ -71,47 +69,18 @@ def validate_response(result, label):
 
 def test_service():
     print("[1/2] Service-level prediction...")
-    from app.services.prediction_service import predict
+    from backend.app.services.prediction_service import predict
     result = predict(dict(SAMPLE_STUDENT))
     validate_response(result, "service")
-    return result
 
 
-def test_http():
-    print(f"[2/2] HTTP POST {API_URL}/api/predict ...")
-    body = json.dumps(SAMPLE_STUDENT).encode("utf-8")
-    req = urllib.request.Request(
-        f"{API_URL}/api/predict",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        print(f"  ⚠️  Server not reachable ({exc.reason}) - "
-              "skipping HTTP test. Start it with:")
-        print("     uvicorn backend.app.main:app --reload")
-        return None
+@pytest.mark.live_http
+def test_http(live_server_url):
+    print(f"[2/2] HTTP POST {live_server_url}/api/predict ...")
+    status, payload = http_post_json(f"{live_server_url}/api/predict", SAMPLE_STUDENT)
+    assert status == 200, f"HTTP prediction failed: {status} {payload}"
     validate_response(payload, "http")
-    return payload
 
 
 if __name__ == "__main__":
-    failures = 0
-    try:
-        test_service()
-    except Exception as exc:
-        failures += 1
-        print(f"  ❌ service test failed: {exc}")
-    try:
-        test_http()
-    except Exception as exc:
-        failures += 1
-        print(f"  ❌ http test failed: {exc}")
-
-    if failures:
-        print(f"\n{failures} test(s) FAILED")
-        sys.exit(1)
-    print("\nAll smoke tests passed ✅")
+    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))

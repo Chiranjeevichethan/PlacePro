@@ -2,11 +2,10 @@
 # PLACEPRO - PHASE 27 - PERFORMANCE ANALYTICS TEST SUITE
 # ============================================================
 #
-# Plain-python tests (no pytest/requests dependency):
+# Run through pytest (the script entry point uses the same fixtures):
 #   python backend/tests/test_performance.py
 #
-# Service-level tests always run (profiles in a temp dir).
-# HTTP tests run when a server is reachable at PLACEPRO_API_URL.
+# Pytest isolates each service test and manages the live HTTP server.
 #
 # Coverage (per Phase 27 spec):
 #   1.  Performance endpoint with valid (verified) profile
@@ -23,28 +22,17 @@
 #  12.  Response schema validation (Pydantic)
 #   + GET /health, GET /api/profile/{id}/performance
 #
-# NOTE ON SHARED TEMP STORES: the HTTP helpers are imported from
-# test_readiness, whose module body also (re)points the store env
-# vars at its own temp dir. That is the existing suite-wide
-# behavior (all service tests share one isolated temp store); it
-# keeps every run isolated from real data in data/profiles/.
+# Storage is configured before collection and rebound per test in conftest.py.
 #
 # ============================================================
 
 import os
 import sys
-import tempfile
+
+import pytest
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-# Isolate the stores (set BEFORE importing the services). The
-# test_readiness import below re-points these to ITS temp dir -
-# same isolation guarantee, one shared suite store.
-_TMP_PROFILES = tempfile.mkdtemp(prefix="placepro_profiles_performance_test_")
-_TMP_ASSESSMENTS = tempfile.mkdtemp(prefix="placepro_assessments_performance_test_")
-os.environ["PLACEPRO_PROFILES_DIR"] = _TMP_PROFILES
-os.environ["PLACEPRO_ASSESSMENTS_DIR"] = _TMP_ASSESSMENTS
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
@@ -55,14 +43,12 @@ from backend.tests.test_resume import (  # noqa: E402
     COMPLETE_RESUME,
     make_pdf,
 )
-from backend.tests.test_readiness import (  # noqa: E402
+from backend.tests.support import (  # noqa: E402
     http_get,
     http_post_json,
     http_put_json,
     multipart_post,
 )
-
-API_URL = os.environ.get("PLACEPRO_API_URL", "http://127.0.0.1:8000")
 
 COMPLETE_ML_INPUTS = {
     "college_tier": "Tier-1", "backlogs": 0, "coding_skills": 7.5,
@@ -84,7 +70,7 @@ ALL_CORE_SKILLS = [
 
 def _draft():
     """Draft profile from the COMPLETE_RESUME fixture (unverified)."""
-    from app.services.profile_service import build_draft_from_resume
+    from backend.app.services.profile_service import build_draft_from_resume
 
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     profile, _ = build_draft_from_resume("resume.pdf", pdf, "application/pdf")
@@ -94,7 +80,7 @@ def _draft():
 def _profile(verified=True, ml_inputs=None):
     """Verified profile with deterministic skills (same fixture
     approach as test_readiness)."""
-    from app.services.profile_service import verify_profile
+    from backend.app.services.profile_service import verify_profile
 
     profile = _draft()
     profile["skills"] = {
@@ -119,7 +105,7 @@ def _record_prediction(profile_id):
     predict_for_profile() is the only honest way to create history.
     Requires a complete ml_inputs set.
     """
-    from app.services.profile_service import predict_for_profile
+    from backend.app.services.profile_service import predict_for_profile
 
     return predict_for_profile(profile_id)
 
@@ -131,12 +117,12 @@ def _run_assessment(profile_id, skill, correct_count):
     the expected score is computed from the served questions rather
     than assumed.
     """
-    from app.services.assessment_service import (
+    from backend.app.services.assessment_service import (
         get_questions,
         start_assessment,
         submit_assessment,
     )
-    from app.services.question_bank import DIFFICULTY_POINTS
+    from backend.app.services.question_bank import DIFFICULTY_POINTS
 
     session = start_assessment(profile_id, skill)
     bank = {q["id"]: q["correct_answer"] for q in get_questions(skill)}
@@ -159,18 +145,9 @@ def _run_assessment(profile_id, skill, correct_count):
     return result, expected
 
 
-PASS = 0
-FAIL = 0
-
-
 def check(condition, label, extra=""):
-    global PASS, FAIL
-    if condition:
-        PASS += 1
-        print(f"  ✅ {label}")
-    else:
-        FAIL += 1
-        print(f"  ❌ {label} {extra}")
+    assert condition, f"{label}: {extra}"
+    print(f"  ✅ {label}")
 
 
 # ------------------------------------------------------------
@@ -180,7 +157,7 @@ def check(condition, label, extra=""):
 
 def test_verified_profile_with_no_history():
     print("[1] Verified profile, no history at all")
-    from app.services.performance_service import get_performance
+    from backend.app.services.performance_service import get_performance
 
     profile = _profile(ml_inputs=COMPLETE_ML_INPUTS)
     r = get_performance(profile["profile_id"])
@@ -204,10 +181,10 @@ def test_verified_profile_with_no_history():
     # int and coerces - assert the contract, not the internal dtype.
     check(0 <= r["summary"]["readiness_score"] <= 100, "readiness in 0-100",
           str(r["summary"]["readiness_score"]))
-    from app.schemas_performance import PerformanceResponse as _PR
+    from backend.app.schemas_performance import PerformanceResponse as _PR
     _m = _PR(**r)
-    check(isinstance(_m.summary.readiness_score, int),
-          "schema-validated readiness_score is int",
+    check(isinstance(_m.summary.readiness_score, float),
+          "schema-validated readiness_score accepts fractional numbers",
           str(type(_m.summary.readiness_score)))
     check(len(r["skills"]) > 0, "skills view populated",
           str(len(r["skills"])))
@@ -217,8 +194,8 @@ def test_verified_profile_with_no_history():
 
 def test_unknown_profile():
     print("[2] Unknown profile")
-    from app.services.performance_service import get_performance
-    from app.services.profile_service import ProfileNotFoundError
+    from backend.app.services.performance_service import get_performance
+    from backend.app.services.profile_service import ProfileNotFoundError
 
     try:
         get_performance("no-such-profile-id")
@@ -229,8 +206,8 @@ def test_unknown_profile():
 
 def test_invalid_profile_id():
     print("[3] Invalid profile id characters")
-    from app.services.performance_service import get_performance
-    from app.services.profile_service import InvalidProfileError
+    from backend.app.services.performance_service import get_performance
+    from backend.app.services.profile_service import InvalidProfileError
 
     try:
         get_performance("bad id!")
@@ -241,7 +218,7 @@ def test_invalid_profile_id():
 
 def test_unverified_profile():
     print("[4] Unverified profile -> 422 convention")
-    from app.services.performance_service import (
+    from backend.app.services.performance_service import (
         PerformanceServiceError,
         get_performance,
     )
@@ -256,7 +233,7 @@ def test_unverified_profile():
 
 def test_prediction_history_summary():
     print("[5] Prediction history summarized (real service path)")
-    from app.services.performance_service import get_performance
+    from backend.app.services.performance_service import get_performance
 
     profile = _profile(ml_inputs=COMPLETE_ML_INPUTS)
     pid = profile["profile_id"]
@@ -282,14 +259,20 @@ def test_prediction_history_summary():
         "lowest_probability correct")
     check(len(r["prediction_history"]) == 2, "history has 2 entries")
     check(all(set(e) == {"timestamp", "model_version",
-                         "placement_probability", "prediction"}
+                         "placement_probability", "prediction", "source_revision",
+                         "source_inputs", "confidence", "request_id"}
               for e in r["prediction_history"]),
           "history entries match PredictionHistoryEntry fields")
+    check(all(e['source_revision'] == r['source_revision'] and
+              e['source_inputs']['cgpa'] == profile['education']['cgpa'] and
+              e['confidence'] is not None and e['request_id'] is None
+              for e in r['prediction_history']),
+          'explicit unkeyed predictions retain source inputs and revision')
 
 
 def test_assessment_history_summary():
     print("[6] Assessment history summarized (real service path)")
-    from app.services.performance_service import get_performance
+    from backend.app.services.performance_service import get_performance
 
     profile = _profile(ml_inputs=COMPLETE_ML_INPUTS)
     pid = profile["profile_id"]
@@ -320,8 +303,8 @@ def test_assessment_history_summary():
 
 def test_combined_histories_and_readiness():
     print("[7] Both histories + readiness delegation")
-    from app.services.performance_service import get_performance
-    from app.services.readiness_service import get_readiness
+    from backend.app.services.performance_service import get_performance
+    from backend.app.services.readiness_service import get_readiness
 
     profile = _profile(ml_inputs=COMPLETE_ML_INPUTS)
     pid = profile["profile_id"]
@@ -353,7 +336,7 @@ def test_combined_histories_and_readiness():
 
 def test_no_fabricated_progress():
     print("[8] No fabricated skill progress")
-    from app.services.performance_service import get_performance
+    from backend.app.services.performance_service import get_performance
 
     profile = _profile(ml_inputs=COMPLETE_ML_INPUTS)
     r = get_performance(profile["profile_id"])
@@ -372,8 +355,8 @@ def test_no_fabricated_progress():
 
 def test_schema_validation():
     print("[9] Pydantic response schema validation")
-    from app.schemas_performance import PerformanceResponse
-    from app.services.performance_service import get_performance
+    from backend.app.schemas_performance import PerformanceResponse
+    from backend.app.services.performance_service import get_performance
 
     profile = _profile(ml_inputs=COMPLETE_ML_INPUTS)
     pid = profile["profile_id"]
@@ -412,37 +395,39 @@ def test_service_suite():
 # ------------------------------------------------------------
 
 
-def _http_verified_complete_profile():
+def _http_verified_complete_profile(api_url):
     """Create a verified complete profile via the API."""
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     status, body = multipart_post(
-        f"{API_URL}/api/profile/from-resume", "file", "resume.pdf", pdf,
+        f"{api_url}/api/profile/from-resume", "file", "resume.pdf", pdf,
         "application/pdf",
     )
     assert status == 200, f"from-resume failed: {status} {body}"
     profile = body["profile"]
     pid = profile["profile_id"]
     profile["ml_inputs"] = dict(COMPLETE_ML_INPUTS)
-    status, body = http_put_json(f"{API_URL}/api/profile/{pid}", profile)
+    status, body = http_put_json(f"{api_url}/api/profile/{pid}", profile)
     assert status == 200, f"PUT failed: {status} {body}"
-    status, body = http_post_json(f"{API_URL}/api/profile/verify",
+    status, body = http_post_json(f"{api_url}/api/profile/verify",
                                   body["profile"])
     assert status == 200 and body["profile"]["verified"], "verify failed"
     return pid
 
 
-def test_http_suite():
+@pytest.mark.live_http
+def test_http_suite(live_server_url):
+    api_url = live_server_url
     print("\n" + "=" * 60)
     print("HTTP-LEVEL TESTS (PHASE 27)")
     print("=" * 60)
 
     # --- /health ---------------------------------------------------
-    status, body = http_get(f"{API_URL}/health")
+    status, body = http_get(f"{api_url}/health")
     check(status == 200 and body.get("status") == "ok", "GET /health")
 
     # --- [10] valid profile, no history yet ------------------------
-    pid = _http_verified_complete_profile()
-    status, body = http_get(f"{API_URL}/api/profile/{pid}/performance")
+    pid = _http_verified_complete_profile(api_url)
+    status, body = http_get(f"{api_url}/api/profile/{pid}/performance")
     check(status == 200, "GET performance (valid profile)",
           f"status={status}")
     check(body.get("profile_id") == pid, "profile_id echoed")
@@ -453,10 +438,11 @@ def test_http_suite():
 
     # --- [11] prediction history flows into the endpoint -----------
     status, body2 = http_post_json(
-        f"{API_URL}/api/profile/{pid}/predict", {})
+        f"{api_url}/api/profile/{pid}/predict", {})
     check(status == 200 and body2.get("ready_for_prediction") is True,
           "profile predict recorded", f"status={status}")
-    status, body = http_get(f"{API_URL}/api/profile/{pid}/performance")
+    status, body = http_get(f"{api_url}/api/profile/{pid}/performance")
+    check(status == 200, "GET performance after prediction", f"{status} {body}")
     check(body["summary"]["predictions"]["predictions_count"] == 1,
           "prediction reflected in performance")
     check(body["summary"]["predictions"]["latest_probability"]
@@ -466,18 +452,19 @@ def test_http_suite():
     # --- [12] unverified -> 422 ------------------------------------
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     status, body3 = multipart_post(
-        f"{API_URL}/api/profile/from-resume", "file", "resume.pdf", pdf,
+        f"{api_url}/api/profile/from-resume", "file", "resume.pdf", pdf,
         "application/pdf",
     )
+    check(status == 200, "setup: unverified profile created", f"{status} {body3}")
     draft_pid = body3["profile"]["profile_id"]
-    status, _ = http_get(f"{API_URL}/api/profile/{draft_pid}/performance")
+    status, _ = http_get(f"{api_url}/api/profile/{draft_pid}/performance")
     check(status == 422, "unverified -> 422", f"status={status}")
 
     # --- [13] unknown -> 404, invalid -> 422 -----------------------
-    status, _ = http_get(f"{API_URL}/api/profile/no-such-id/performance")
+    status, _ = http_get(f"{api_url}/api/profile/no-such-id/performance")
     check(status == 404, "unknown profile -> 404", f"status={status}")
     status, _ = http_get(
-        f"{API_URL}/api/profile/invalid%20id%21/performance")
+        f"{api_url}/api/profile/invalid%20id%21/performance")
     check(status == 422, "invalid id -> 422", f"status={status}")
 
 
@@ -486,22 +473,4 @@ def test_http_suite():
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    test_service_suite()
-
-    server_up = False
-    try:
-        status, _ = http_get(f"{API_URL}/health")
-        server_up = status == 200
-    except AssertionError:
-        server_up = False
-
-    if server_up:
-        test_http_suite()
-    else:
-        print(f"\n⚠️  Server not reachable at {API_URL} - skipping HTTP tests.")
-        print("   Start it with:  uvicorn backend.app.main:app --reload")
-
-    print(f"\n{'=' * 60}")
-    print(f"RESULT: {PASS} passed, {FAIL} failed")
-    print("=" * 60)
-    sys.exit(1 if FAIL else 0)
+    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))

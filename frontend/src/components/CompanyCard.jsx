@@ -23,6 +23,7 @@
 import IconMark from "./IconMark";
 import SkillChip from "./SkillChip";
 import MatchProgress from "./MatchProgress";
+import { finiteNumberOrNull } from '../services/resultDisplay.js';
 
 /** Safely extract a de-duplicated list of non-empty display strings. */
 const toDisplayList = (value) => {
@@ -34,10 +35,7 @@ const toDisplayList = (value) => {
   return [...new Set(cleaned)];
 };
 
-const asFiniteNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
+const asFiniteNumber = finiteNumberOrNull;
 
 function CompanyCard({ company }) {
   const item = company ?? {};
@@ -52,7 +50,9 @@ function CompanyCard({ company }) {
     (typeof item.eligibility_status === "string" && item.eligibility_status) ||
     (typeof item.status === "string" && item.status) ||
     "";
-  const isEligible = eligibility === "ELIGIBLE";
+  const eligibilityTone = eligibility === 'ELIGIBLE' ? 'eligible'
+    : eligibility === 'NOT_ELIGIBLE' ? 'not-eligible'
+    : eligibility === 'INCOMPLETE' ? 'incomplete' : 'unknown';
 
   const recommendationScore = asFiniteNumber(item.recommendation_score);
   const skillMatchScore = asFiniteNumber(item.skill_match?.score);
@@ -96,7 +96,7 @@ function CompanyCard({ company }) {
     hasProbabilityRow || hasReadinessRows || hasLists;
 
   return (
-    <div className={`company-card ${isEligible ? "" : "not-eligible"}`}>
+    <div className={`company-card ${eligibilityTone === 'eligible' ? '' : eligibilityTone}`}>
       <div className="company-card-header">
         <div className="company-icon gradient">
           <IconMark name="professional" />
@@ -106,14 +106,17 @@ function CompanyCard({ company }) {
           <h3>{name}</h3>
         </div>
 
-        {eligibility && (
-          <span
-            className={`company-eligibility ${isEligible ? "eligible" : "not-eligible"}`}
-          >
-            {eligibility}
-          </span>
-        )}
+        <span className={`company-eligibility ${eligibilityTone}`}>
+          {eligibility || 'UNKNOWN'}
+        </span>
       </div>
+
+      {eligibilityTone === 'incomplete' && <p className="company-eligibility-note incomplete">
+        Eligibility cannot yet be determined. Complete the missing profile information below.
+      </p>}
+      {eligibilityTone === 'unknown' && <p className="company-eligibility-note unknown">
+        Eligibility status is unavailable.
+      </p>}
 
       {recommendationScore !== null && (
         <MatchProgress

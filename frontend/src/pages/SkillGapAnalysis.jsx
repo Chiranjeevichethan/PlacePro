@@ -7,53 +7,25 @@
  * (skill gaps) are displayed exactly as returned. Learning resources are a
  * frontend catalog shown only for skills the backend reports as missing.
  */
-import { useCallback, useEffect, useState } from "react";
 import IconMark from "../components/IconMark";
 import SkillGapCard from "../components/SkillGapCard";
 import LearningResourceCard from "../components/LearningResourceCard";
-import { LEARNING_RESOURCES } from "../data/recommendationData";
+import { getLearningResources } from "../data/recommendationData";
 import { fetchStudentReadiness } from "../services/api";
-import { DEMO_PROFILE_ID } from "../services/profileConfig";
+import { useProfileResource } from '../hooks/useProfileResource';
+import { resolveSkillGapDisplay } from "../services/skillGapDisplay.js";
 
 function SkillGapAnalysis() {
-  const [status, setStatus] = useState("loading");
-  const [readiness, setReadiness] = useState(null);
-  const [error, setError] = useState(null);
-  const [attempt, setAttempt] = useState(0);
+  /* The readiness analysis belongs to the CURRENT student: use the shared
+     profile id (after a resume is verified it is no longer the demo id). */
+  const { data: readiness, error, loading, refetch } = useProfileResource(fetchStudentReadiness);
+  const view = resolveSkillGapDisplay({ readiness, loading, error });
+  const { missingSkills = [] } = view;
 
-  useEffect(() => {
-    let active = true;
-
-    fetchStudentReadiness(DEMO_PROFILE_ID)
-      .then((data) => {
-        if (!active) return;
-        setReadiness(data);
-        setError(null);
-        setStatus("success");
-      })
-      .catch((err) => {
-        if (!active) return;
-        setReadiness(null);
-        setError(
-          err?.message ?? "Unable to load readiness data. Please try again."
-        );
-        setStatus("error");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [attempt]);
-
-  const refetch = useCallback(() => {
-    setStatus("loading");
-    setReadiness(null);
-    setError(null);
-    setAttempt((n) => n + 1);
-  }, []);
-
-  const missingSkills =
-    readiness?.skill_gaps?.map((entry) => entry.skill) ?? [];
+  const resourceCards = missingSkills.map((skill) => ({
+    skill,
+    resources: getLearningResources(skill),
+  }));
 
   return (
     <div className="skillgap-page">
@@ -65,17 +37,17 @@ function SkillGapAnalysis() {
         </p>
       </div>
 
-      {status === "loading" && (
+      {view.state === "loading" && (
         <div className="profile-section profile-loading">
           <div className="spinner" aria-hidden="true"></div>
           <p>Loading readiness analysis...</p>
         </div>
       )}
 
-      {status === "error" && (
+      {view.state === "error" && (
         <div className="profile-section profile-error-state">
           <div className="error-banner" role="alert">
-            {error}
+            {view.error}
           </div>
           <button type="button" className="dash-btn primary" onClick={refetch}>
             Retry
@@ -83,7 +55,18 @@ function SkillGapAnalysis() {
         </div>
       )}
 
-      {status === "success" && readiness && (
+      {view.state === "unavailable" && (
+        <div className="profile-section profile-error-state">
+          <div className="error-banner" role="alert">
+            The readiness service returned incomplete analysis data. Please retry.
+          </div>
+          <button type="button" className="dash-btn primary" onClick={refetch}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {view.state === "ready" && readiness && (
         <>
           <section className="analysis-section">
             <h2>
@@ -92,6 +75,17 @@ function SkillGapAnalysis() {
             </h2>
 
             <SkillGapCard readiness={readiness} />
+            <p className="dash-card-note">Readiness measures preparation evidence, not placement probability. A missing or insufficient skill means the profile has not yet demonstrated it; it does not prove you lack the ability.</p>
+            {view.hasNoGaps && (
+              <div className="analysis-card" role="status">
+                <p>{view.emptyMessage}</p>
+              </div>
+            )}
+            {view.profileIncomplete && !view.hasNoGaps && (
+              <p className="dash-card-note" role="status">
+                Your profile still has sections to complete. Recommendations reflect the information currently available and may change when you add details.
+              </p>
+            )}
           </section>
 
           {missingSkills.length > 0 && (
@@ -107,11 +101,11 @@ function SkillGapAnalysis() {
               </p>
 
               <div className="resource-grid">
-                {missingSkills.map((skill) => (
+                {resourceCards.map(({ skill, resources }) => (
                   <LearningResourceCard
                     key={skill}
                     skill={skill}
-                    resources={LEARNING_RESOURCES[skill] || []}
+                    resources={resources}
                   />
                 ))}
               </div>

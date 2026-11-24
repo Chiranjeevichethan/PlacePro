@@ -117,12 +117,17 @@ class PredictionHistoryEntry(BaseModel):
     model_version: str
     placement_probability: float
     prediction: str
+    source_revision: Optional[int] = None
+    source_inputs: Optional[Dict[str, Any]] = None
+    confidence: Optional[float] = None
+    request_id: Optional[str] = None
 
 
 class StudentProfile(BaseModel):
     """The canonical unified student profile."""
 
     profile_id: Optional[str] = None
+    revision: Optional[int] = Field(default=None, ge=0, strict=True)
     personal: PersonalInfo = Field(default_factory=PersonalInfo)
     education: EducationInfo = Field(default_factory=EducationInfo)
     skills: SkillSet = Field(default_factory=SkillSet)
@@ -199,6 +204,8 @@ class ProfilePredictionResponse(BaseModel):
     """
 
     ready_for_prediction: bool
+    profile_id: Optional[str] = None
+    source_revision: Optional[int] = None
     prediction: Optional[str] = None
     placement_probability: Optional[float] = None
     confidence: Optional[float] = None

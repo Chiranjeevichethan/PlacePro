@@ -36,6 +36,7 @@ from .ml_feature_mapping import (
 )
 from .profile_service import collect_nonempty_paths
 from .resume_service import _process_resume_upload_full
+from .resume_parser import detect_sections
 
 # ------------------------------------------------------------
 # CONFIDENCE LABELS (heuristic extraction confidence)
@@ -139,26 +140,9 @@ def build_field_provenance(extracted: dict, raw_text: str) -> list:
 # RESUME DIAGNOSTICS
 # ------------------------------------------------------------
 
-# Section keywords (mirrors the Phase 9 parser's section detector)
-_SECTION_KEYWORDS = {
-    "education": ["education", "academic"],
-    "skills": ["skills", "technical skills", "technologies"],
-    "experience": ["experience", "work experience"],
-    "internships": ["internship", "internships"],
-    "projects": ["projects", "project"],
-    "certifications": ["certification", "certifications"],
-    "achievements": ["achievement", "achievements", "awards",
-                     "publications", "open source"],
-}
-
-
 def _detected_sections(raw_text: str) -> list:
-    found = []
-    lowered = (raw_text or "").lower()
-    for section, keywords in _SECTION_KEYWORDS.items():
-        if any(kw in lowered for kw in keywords):
-            found.append(section)
-    return found
+    return [section for section in detect_sections((raw_text or '').splitlines())
+            if section != 'other']
 
 
 def _word_count(raw_text: str) -> int:
@@ -207,6 +191,9 @@ def _section_populated(extracted: dict, section: str) -> bool:
     if section == "achievements":
         ach = extracted.get("achievements") or {}
         return any(ach.values())
+    if section in ('hackathons', 'open_source', 'extracurriculars'):
+        bucket = 'open_source_contributions' if section == 'open_source' else section
+        return bool((extracted.get('achievements') or {}).get(bucket))
     return False
 
 

@@ -40,3 +40,16 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local development and temporary tooling
+.freebuff/
+.playwright-mcp/
+.ui-*.png
+
+# Backup and patch files
+*.bak
+*.bak.py
+*.patch
+
+# Local server logs
+uvicorn_test.log

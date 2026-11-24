@@ -37,6 +37,7 @@ class RequirementResult(BaseModel):
     mandatory: bool = True
     explanation: str
     action: Optional[str] = None
+    evidence_status: Optional[str] = None
 
 
 class RequirementGroups(BaseModel):
@@ -53,6 +54,8 @@ class CompanyEligibilityResponse(BaseModel):
     """
 
     company_id: str
+    profile_id: Optional[str] = None
+    source_revision: Optional[int] = None
     company_name: str
     status: str
     requirements: RequirementGroups
@@ -70,6 +73,8 @@ class CompanyEligibilitySummary(BaseModel):
 
 
 class AllCompanyEligibilityResponse(BaseModel):
+    profile_id: Optional[str] = None
+    source_revision: Optional[int] = None
     eligible: List[CompanyEligibilitySummary] = Field(default_factory=list)
     not_eligible: List[CompanyEligibilitySummary] = Field(default_factory=list)
     incomplete: List[CompanyEligibilitySummary] = Field(default_factory=list)

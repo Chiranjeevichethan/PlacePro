@@ -44,6 +44,8 @@ class PredictionSummary(BaseModel):
     latest_prediction: Optional[str] = None
     latest_probability: Optional[float] = None
     latest_timestamp: Optional[str] = None
+    latest_source_revision: Optional[int] = None
+    latest_is_current: Optional[bool] = None
     highest_probability: Optional[float] = None
     lowest_probability: Optional[float] = None
 
@@ -70,7 +72,7 @@ class PerformanceSummary(BaseModel):
 
     predictions: PredictionSummary = Field(default_factory=PredictionSummary)
     assessments: AssessmentSummary = Field(default_factory=AssessmentSummary)
-    readiness_score: int
+    readiness_score: float = Field(ge=0, le=100, allow_inf_nan=False)
     readiness_level: str
     skills_tracked: int
 
@@ -87,6 +89,7 @@ class PerformanceResponse(BaseModel):
     """
 
     profile_id: str
+    source_revision: Optional[int] = None
     verified: bool
     summary: PerformanceSummary
     prediction_history: List[PredictionHistoryEntry] = Field(default_factory=list)

@@ -1,0 +1,201 @@
+name: Release Linux verification
+
+on:
+  push:
+    branches: [main, bhargav-frontend]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-linux-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUNBUFFERED: '1'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+# Official actions v6.0.0 tag references and action.yml inputs were verified
+# against actions/checkout, actions/setup-python and actions/setup-node.
+# No deployment, publishing, credentials, caches or artifact uploads.
+jobs:
+  backend-linux:
+    name: Backend Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out reviewed source without persisted credentials
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - name: Select exact Python baseline
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version-file: .python-version
+          architecture: x64
+          check-latest: false
+      - name: Select exact Node baseline for the existing Vite demo tests
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .node-version
+          check-latest: false
+          package-manager-cache: false
+      - name: Verify versions, source files, trusted model hashes and OpenSSL
+        run: python -B scripts/ci/verify_release.py --source --node --openssl
+      - name: Install only the pinned backend release wheels
+        timeout-minutes: 10
+        run: |
+          umask 077
+          if ! python -m pip install --only-binary=:all: -r requirements-dev.txt >"$RUNNER_TEMP/placepro-pip.log" 2>&1; then
+            echo '::error::Pinned backend dependency installation failed. Check availability of the exact Linux x64 release wheels; versions were not upgraded.'
+            exit 1
+          fi
+          python -m pip check
+      - name: Install the locked frontend dependencies for the isolated demo harness
+        working-directory: frontend
+        timeout-minutes: 5
+        run: |
+          umask 077
+          if ! npm ci --no-audit --no-fund >"$RUNNER_TEMP/placepro-backend-npm.log" 2>&1; then
+            echo '::error::The locked frontend installation failed. No package or lockfile upgrade was attempted.'
+            exit 1
+          fi
+      - name: Verify imports, three-model inference and the full default backend suite
+        timeout-minutes: 15
+        run: python -B scripts/ci/verify_release.py --source --development --node --openssl --models --backend-tests
+        # Includes live HTTP/HTTPS, authenticated inference, ownership, CSRF,
+        # revisions and the real Vite development harness. TLS is not skipped.
+        # Offline population/holdout tests require deliberately excluded data
+        # and are invoked separately by an authorised data operator.
+
+  production-docker:
+    name: Production Docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out reviewed source without persisted credentials
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - name: Select exact Python baseline for the read-only verifier
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version-file: .python-version
+          architecture: x64
+          check-latest: false
+      - name: Verify source, model baselines and Docker availability
+        run: |
+          python -B scripts/ci/verify_release.py --source
+          umask 077
+          if ! command -v docker >/dev/null || ! docker info >"$RUNNER_TEMP/placepro-docker-info.log" 2>&1; then
+            echo '::error::A working Docker engine is required on the hosted runner; no installer or fallback is used.'
+            exit 1
+          fi
+      - name: Build the existing production Dockerfile from the repository root
+        timeout-minutes: 15
+        run: |
+          umask 077
+          if ! docker build --platform linux/amd64 --file Dockerfile --tag placepro-backend:ci . >"$RUNNER_TEMP/placepro-docker-build.log" 2>&1; then
+            echo '::error::Production Docker build failed. The pinned base image, release wheels, imports and model loading must succeed without substitutions.'
+            exit 1
+          fi
+          if [[ "$(docker image inspect --format '{{.Config.User}}' placepro-backend:ci)" != '10001:10001' ]]; then
+            echo '::error::The production image must retain its non-root user.'
+            exit 1
+          fi
+      - name: Check private image contents and real placement, salary and V1 inference
+        timeout-minutes: 5
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/scripts/ci/verify_release.py,target=/ci/verify_release.py,readonly" \
+            --entrypoint python placepro-backend:ci -B /ci/verify_release.py \
+            --root /app --image --runtime --models
+      - name: Start the production command with isolated ephemeral storage
+        run: |
+          docker run --detach --name placepro-release-ci --read-only --cap-drop ALL \
+            --security-opt no-new-privileges=true \
+            --publish 127.0.0.1:18000:8000 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --tmpfs /var/lib/placepro:rw,noexec,nosuid,uid=10001,gid=10001,mode=0700,size=64m \
+            --env PLACEPRO_ALLOWED_ORIGINS=https://app.example.test \
+            --env FORWARDED_ALLOW_IPS=127.0.0.1/32 \
+            placepro-backend:ci
+          python -B scripts/ci/verify_release.py --container-http http://127.0.0.1:18000
+      - name: Stop only this job's container
+        if: always()
+        run: |
+          if docker container inspect placepro-release-ci >/dev/null 2>&1; then
+            docker rm --force placepro-release-ci >/dev/null
+          fi
+
+  frontend-linux:
+    name: Frontend Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out reviewed source without persisted credentials
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - name: Select exact Python baseline for source and model-hash verification
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version-file: .python-version
+          architecture: x64
+          check-latest: false
+      - name: Select exact Node baseline
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .node-version
+          check-latest: false
+          package-manager-cache: false
+      - name: Verify exact Node/npm versions, source and model baselines
+        run: python -B scripts/ci/verify_release.py --source --node
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        timeout-minutes: 5
+        run: |
+          umask 077
+          if ! npm ci --no-audit --no-fund >"$RUNNER_TEMP/placepro-frontend-npm.log" 2>&1; then
+            echo '::error::The locked frontend installation failed. No package or lockfile upgrade was attempted.'
+            exit 1
+          fi
+      - name: Run frontend tests
+        working-directory: frontend
+        run: |
+          umask 077
+          if ! npm test >"$RUNNER_TEMP/placepro-frontend-tests.log" 2>&1; then
+            echo '::error::Frontend regression tests failed. Reproduce with npm test; private logs are not uploaded.'
+            exit 1
+          fi
+      - name: Run frontend lint
+        working-directory: frontend
+        run: |
+          umask 077
+          if ! npm run lint >"$RUNNER_TEMP/placepro-frontend-lint.log" 2>&1; then
+            echo '::error::Frontend lint failed. Reproduce with npm run lint; private logs are not uploaded.'
+            exit 1
+          fi
+      - name: Build the production frontend with the existing HTTPS guard
+        working-directory: frontend
+        env:
+          NODE_ENV: production
+          # Reserved, non-secret origin for build validation only; no API is
+          # contacted. A deployment must supply its reviewed real HTTPS origin.
+          VITE_API_BASE_URL: https://api.example.test
+        run: |
+          umask 077
+          if ! npm run build >"$RUNNER_TEMP/placepro-frontend-build.log" 2>&1; then
+            echo '::error::Production Vite build failed. HTTPS/non-loopback API validation remains enabled.'
+            exit 1
+          fi

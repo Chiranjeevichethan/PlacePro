@@ -19,8 +19,8 @@ class StartAssessmentRequest(BaseModel):
     )
     skill: str = Field(..., description="Canonical skill name (Phase 12 taxonomy)")
     num_questions: Optional[int] = Field(
-        default=None, ge=1, le=10,
-        description="Optional question count (max 10)",
+        default=None, ge=1, le=25,
+        description="Optional question count (defaults to 25)",
     )
 
 
@@ -43,6 +43,9 @@ class StartAssessmentResponse(BaseModel):
     total_questions: int
     questions: List[AssessmentQuestion] = Field(default_factory=list)
     time_limit_minutes: Optional[int] = None
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    server_now: Optional[str] = None
 
 
 class SubmitAssessmentRequest(BaseModel):
@@ -93,8 +96,13 @@ class SkillViewEntry(BaseModel):
     assessment_score: Optional[float] = None
     assessment_verified: bool = False
     level: Optional[str] = None
+    evidence_status: str = "MISSING"
+    evidence_sources: List[str] = Field(default_factory=list)
+    profile_confirmed: bool = False
+    assessment_timestamp: Optional[str] = None
 
 
 class SkillsViewResponse(BaseModel):
     profile_id: str
+    source_revision: Optional[int] = None
     skills: List[SkillViewEntry] = Field(default_factory=list)

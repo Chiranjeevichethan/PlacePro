@@ -6,15 +6,17 @@
  * truth: companies, group membership, ordering, and every score come from
  * the response. No demo companies, no frontend match/score computation.
  *
- * The student profile summary uses the already-integrated profile API
- * (GET /api/profile/{id}, Phase 4B) — the recommendations endpoint does not
- * provide profile data, and no demo profile values are shown.
+ * The student profile summary reuses the ONE shared profile from
+ * StudentProfileContext (GET /api/profile/{id}); no second profile fetch and
+ * no demo profile values are shown.
  */
-import { useCallback, useEffect, useState } from "react";
 import IconMark from "../components/IconMark";
 import CompanyCard from "../components/CompanyCard";
-import { fetchCompanyRecommendations, fetchStudentProfile } from "../services/api";
-import { DEMO_PROFILE_ID, flattenBackendProfile } from "../services/profileConfig";
+import { fetchCompanyRecommendations } from "../services/api";
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { useProfileResource } from '../hooks/useProfileResource';
+
+const loadRecommendations = (id) => fetchCompanyRecommendations(id, 10);
 
 /** Group render order (backend ranking inside each group is kept as-is). */
 const RECOMMENDATION_GROUPS = [
@@ -25,67 +27,18 @@ const RECOMMENDATION_GROUPS = [
 ];
 
 function CompanyRecommendations() {
+  /* Same canonical profile as every other page. */
+  const { profile } = useStudentProfileContext();
+
   /* Recommendations: loading / success / error, SkillGapAnalysis pattern. */
-  const [status, setStatus] = useState("loading");
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [attempt, setAttempt] = useState(0);
-
-  /* Profile summary from the existing (Phase 4B) profile API. Optional:
-     if it fails, the summary section is hidden and recommendations still
-     render — no demo profile values are ever substituted. */
-  const [profile, setProfile] = useState(null);
-
-  useEffect(() => {
-    let active = true;
-
-    fetchCompanyRecommendations(DEMO_PROFILE_ID, 10)
-      .then((response) => {
-        if (!active) return;
-        setData(response);
-        setError(null);
-        setStatus("success");
-      })
-      .catch((err) => {
-        if (!active) return;
-        setData(null);
-        setError(
-          err?.message ?? "Unable to load recommendations. Please try again."
-        );
-        setStatus("error");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [attempt]);
-
-  useEffect(() => {
-    let active = true;
-
-    fetchStudentProfile(DEMO_PROFILE_ID)
-      .then((response) => {
-        if (active) setProfile(flattenBackendProfile(response.profile));
-      })
-      .catch(() => {
-        if (active) setProfile(null);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const refetch = useCallback(() => {
-    setStatus("loading");
-    setData(null);
-    setError(null);
-    setAttempt((n) => n + 1);
-  }, []);
+  const { data, error, loading, refetch } = useProfileResource(loadRecommendations);
+  const status = error ? 'error' : loading ? 'loading' : 'success';
+  const hasRecommendations = RECOMMENDATION_GROUPS.some(({ key }) =>
+    Array.isArray(data?.recommendations?.[key]) && data.recommendations[key].length > 0);
 
   const summaryItems = profile
     ? [
-        { label: "CGPA", value: profile.cgpa || "Not set" },
+        { label: "CGPA", value: profile.cgpa === '' ? 'Not set' : profile.cgpa },
         {
           label: "Skills",
           value: profile.skills?.length
@@ -139,6 +92,10 @@ function CompanyRecommendations() {
           ========================================= */}
       {status === "success" && data && (
         <>
+          <p className="dash-card-note">Company requirements are demonstration data for this application.</p>
+          {!hasRecommendations && <p className="skills-empty" role="status">
+            No company recommendations are available for this profile.
+          </p>}
           {summaryItems.length > 0 && (
             <section className="analysis-section">
               <h2>

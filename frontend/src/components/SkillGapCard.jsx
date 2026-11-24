@@ -35,6 +35,8 @@ function SkillGapCard({ readiness }) {
 
   const matchedSkills = toSkillNames(readiness?.strengths);
   const missingSkills = toSkillNames(readiness?.skill_gaps);
+  const explanations = (Array.isArray(readiness?.skill_gaps) ? readiness.skill_gaps : [])
+    .filter((entry) => typeof entry?.skill === 'string' && typeof entry?.reason === 'string' && entry.reason.trim());
 
   return (
     <div className="dash-card skill-gap-card">
@@ -72,13 +74,26 @@ function SkillGapCard({ readiness }) {
                 <SkillChip key={skill} skill={skill} variant="missing" />
               ))
             ) : (
-              <span className="skills-complete">
-                All required skills covered ✓
-              </span>
+              <span className="skills-empty">No skill gaps reported</span>
             )}
           </div>
         </div>
       </div>
+
+      <p className="dash-card-note">
+        Matched skills include confirmed claims and qualifying assessments.
+        A claim alone does not establish tested proficiency.
+      </p>
+      {explanations.length > 0 && (
+        <details className="company-details">
+          <summary className="company-details-summary">Evidence explanations</summary>
+          <ul className="company-detail-list">
+            {explanations.map((entry) => (
+              <li key={entry.skill}><strong>{entry.skill}:</strong> {entry.reason}</li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       <div className="skill-gap-footer">
         <span className="skills-label">Current Skills</span>

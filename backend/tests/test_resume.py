@@ -2,11 +2,10 @@
 # PLACEPRO - PHASE 9 - RESUME UPLOAD TEST SUITE
 # ============================================================
 #
-# Plain-python tests (no pytest/requests dependency):
+# Run through pytest (the script entry point uses the same fixtures):
 #   python backend/tests/test_resume.py
 #
-# Service-level tests always run. HTTP tests run when a server is
-# reachable at PLACEPRO_API_URL (default http://127.0.0.1:8000).
+# HTTP tests use the isolated server configured in tests/README.md.
 #
 # Coverage (per Phase 9 spec):
 #   1. Valid PDF          6. Resume with complete information
@@ -19,12 +18,10 @@
 # ============================================================
 
 import io
-import json
 import os
 import sys
-import urllib.error
-import urllib.request
-import uuid
+
+import pytest
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -35,7 +32,8 @@ PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
 sys.path.insert(0, BACKEND_ROOT)
 sys.path.insert(0, PROJECT_ROOT)
 
-API_URL = os.environ.get("PLACEPRO_API_URL", "http://127.0.0.1:8000")
+from backend.tests.support import http_get, http_post_json, multipart_post
+
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 # ------------------------------------------------------------
@@ -177,80 +175,17 @@ def make_docx(text):
 
 
 # ------------------------------------------------------------
-# HTTP HELPERS
-# ------------------------------------------------------------
-
-
-def multipart_post(url, field_name, filename, content, content_type):
-    boundary = "----PlaceProBoundary" + uuid.uuid4().hex
-    body = b""
-    body += f"--{boundary}\r\n".encode()
-    body += (f'Content-Disposition: form-data; name="{field_name}"; '
-             f'filename="{filename}"\r\n').encode()
-    body += f"Content-Type: {content_type}\r\n\r\n".encode()
-    body += content + b"\r\n"
-    body += f"--{boundary}--\r\n".encode()
-
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        try:
-            return exc.code, json.loads(body)
-        except json.JSONDecodeError:
-            return exc.code, {"detail": body}
-
-
-def http_get(url):
-    try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise AssertionError(f"Server not reachable: {exc.reason}")
-
-
-def http_post_json(url, payload):
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode("utf-8"))
-
-
-# ------------------------------------------------------------
 # SERVICE-LEVEL TESTS
 # ------------------------------------------------------------
 
-PASS = 0
-FAIL = 0
-
-
 def check(condition, label, extra=""):
-    global PASS, FAIL
-    if condition:
-        PASS += 1
-        print(f"  ✅ {label}")
-    else:
-        FAIL += 1
-        print(f"  ❌ {label} {extra}")
+    assert condition, f"{label}: {extra}"
+    print(f"  ✅ {label}")
 
 
 def test_valid_pdf():
     print("[1] Valid PDF")
-    from app.services.resume_service import process_resume_upload
+    from backend.app.services.resume_service import process_resume_upload
     content = make_pdf(COMPLETE_RESUME.splitlines())
     result = process_resume_upload("resume.pdf", content, "application/pdf")
     check(result["success"] is True, "success flag", str(result)[:200])
@@ -270,12 +205,11 @@ def test_valid_pdf():
     check(len(p["internships"]) == 1, "1 internship")
     check(len(p["certifications"]) == 1, "1 certification")
     check(p["certifications"][0]["year"] == 2023, "cert year")
-    return result
 
 
 def test_valid_docx():
     print("[2] Valid DOCX")
-    from app.services.resume_service import process_resume_upload
+    from backend.app.services.resume_service import process_resume_upload
     content = make_docx(COMPLETE_RESUME)
     result = process_resume_upload("resume.docx", content, DOCX_MIME)
     check(result["success"] is True, "success flag", str(result)[:200])
@@ -288,12 +222,11 @@ def test_valid_docx():
     check(len(p["experience"]) == 1, "1 experience entry")
     check(p["experience"][0]["company"] == "Google", "experience company",
           repr(p["experience"][0]["company"]))
-    return result
 
 
 def test_unsupported_file():
     print("[3] Unsupported file")
-    from app.services.resume_service import (
+    from backend.app.services.resume_service import (
         UnsupportedFileTypeError,
         process_resume_upload,
     )
@@ -306,7 +239,7 @@ def test_unsupported_file():
 
 def test_empty_file():
     print("[4] Empty file")
-    from app.services.resume_service import EmptyFileError, process_resume_upload
+    from backend.app.services.resume_service import EmptyFileError, process_resume_upload
     try:
         process_resume_upload("empty.pdf", b"", "application/pdf")
         check(False, "empty rejected")
@@ -316,7 +249,7 @@ def test_empty_file():
 
 def test_corrupted_file():
     print("[5] Corrupted file")
-    from app.services.resume_service import (
+    from backend.app.services.resume_service import (
         CorruptedFileError,
         process_resume_upload,
     )
@@ -337,7 +270,7 @@ def test_corrupted_file():
 
 def test_complete_information():
     print("[6] Complete resume information")
-    from app.services.resume_parser import parse_resume
+    from backend.app.services.resume_parser import parse_resume
     profile, confidence, needs_verification = parse_resume(COMPLETE_RESUME)
     check(profile["name"] == "John Doe", "name")
     check(profile["email"] == "john.doe@gmail.com", "email")
@@ -376,7 +309,7 @@ def test_complete_information():
 
 def test_missing_information():
     print("[7] Resume with missing information")
-    from app.services.resume_parser import parse_resume
+    from backend.app.services.resume_parser import parse_resume
     profile, confidence, needs_verification = parse_resume(MISSING_INFO_RESUME)
     check(profile["education"]["cgpa"] is None, "cgpa is None (not invented)")
     check(profile["github"] is None, "github is None (not invented)")
@@ -390,7 +323,7 @@ def test_missing_information():
 
 def test_multiple_projects():
     print("[8] Resume with multiple projects")
-    from app.services.resume_parser import parse_resume
+    from backend.app.services.resume_parser import parse_resume
     profile, _, _ = parse_resume(MULTIPLE_PROJECTS_RESUME)
     check(len(profile["projects"]) == 3, "3 projects extracted",
           str(len(profile["projects"])))
@@ -404,7 +337,7 @@ def test_multiple_projects():
 
 def test_multiple_internships():
     print("[9] Resume with multiple internships")
-    from app.services.resume_parser import parse_resume
+    from backend.app.services.resume_parser import parse_resume
     profile, _, _ = parse_resume(MULTIPLE_INTERNSHIPS_RESUME)
     check(len(profile["internships"]) == 2, "2 internships extracted",
           str(len(profile["internships"])))
@@ -437,13 +370,15 @@ def test_service_suite():
 # ------------------------------------------------------------
 
 
-def test_http_suite():
+@pytest.mark.live_http
+def test_http_suite(live_server_url):
+    api_url = live_server_url
     print("\n" + "=" * 60)
     print("HTTP-LEVEL TESTS")
     print("=" * 60)
 
     # --- GET /health ------------------------------------------------
-    status, body = http_get(f"{API_URL}/health")
+    status, body = http_get(f"{api_url}/health")
     check(status == 200 and body.get("status") == "ok", "GET /health",
           f"status={status} body={body}")
 
@@ -456,7 +391,7 @@ def test_http_suite():
         "projects_count": 4, "certifications": 2, "hackathons": 1,
         "open_source_contributions": 1, "extracurriculars": 1,
     }
-    status, body = http_post_json(f"{API_URL}/api/predict", profile)
+    status, body = http_post_json(f"{api_url}/api/predict", profile)
     check(status == 200 and body.get("prediction") in ("PLACED", "NOT PLACED"),
           "POST /api/predict (Phase 8 regression)",
           f"status={status} body={body}")
@@ -464,7 +399,7 @@ def test_http_suite():
     # --- POST /api/resume/upload: valid PDF ------------------------
     pdf = make_pdf(COMPLETE_RESUME.splitlines())
     status, body = multipart_post(
-        f"{API_URL}/api/resume/upload", "file", "resume.pdf", pdf,
+        f"{api_url}/api/resume/upload", "file", "resume.pdf", pdf,
         "application/pdf",
     )
     check(status == 200 and body.get("success") is True, "upload valid PDF",
@@ -479,7 +414,7 @@ def test_http_suite():
     # --- POST /api/resume/upload: valid DOCX -----------------------
     docx_bytes = make_docx(COMPLETE_RESUME)
     status, body = multipart_post(
-        f"{API_URL}/api/resume/upload", "file", "resume.docx", docx_bytes,
+        f"{api_url}/api/resume/upload", "file", "resume.docx", docx_bytes,
         DOCX_MIME,
     )
     check(status == 200 and body.get("success") is True, "upload valid DOCX",
@@ -490,21 +425,21 @@ def test_http_suite():
 
     # --- Unsupported file -------------------------------------------
     status, body = multipart_post(
-        f"{API_URL}/api/resume/upload", "file", "notes.txt",
+        f"{api_url}/api/resume/upload", "file", "notes.txt",
         b"plain text", "text/plain",
     )
     check(status == 415, "unsupported file -> 415", f"status={status} {body}")
 
     # --- Empty file --------------------------------------------------
     status, body = multipart_post(
-        f"{API_URL}/api/resume/upload", "file", "empty.pdf", b"",
+        f"{api_url}/api/resume/upload", "file", "empty.pdf", b"",
         "application/pdf",
     )
     check(status == 400, "empty file -> 400", f"status={status} {body}")
 
     # --- Corrupted file ----------------------------------------------
     status, body = multipart_post(
-        f"{API_URL}/api/resume/upload", "file", "corrupt.pdf",
+        f"{api_url}/api/resume/upload", "file", "corrupt.pdf",
         b"%PDF-1.4\nthis is not a real pdf", "application/pdf",
     )
     check(status == 422, "corrupted file -> 422", f"status={status} {body}")
@@ -515,22 +450,4 @@ def test_http_suite():
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    test_service_suite()
-
-    server_up = False
-    try:
-        status, _ = http_get(f"{API_URL}/health")
-        server_up = status == 200
-    except AssertionError:
-        server_up = False
-
-    if server_up:
-        test_http_suite()
-    else:
-        print(f"\n⚠️  Server not reachable at {API_URL} - skipping HTTP tests.")
-        print("   Start it with:  uvicorn backend.app.main:app --reload")
-
-    print(f"\n{'=' * 60}")
-    print(f"RESULT: {PASS} passed, {FAIL} failed")
-    print("=" * 60)
-    sys.exit(1 if FAIL else 0)
+    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))

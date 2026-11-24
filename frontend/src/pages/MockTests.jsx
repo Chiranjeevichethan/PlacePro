@@ -1,502 +1,327 @@
 /**
- * Mock Tests page (Phase 6B, Step 3).
- *
- * REAL assessment flow: setup -> running test (timer + navigator) ->
- * confirmation -> submitting -> result.
- *
- * The backend is authoritative: questions come from the real assessment
- * API (see src/services/mockTest.js over src/services/api.js), and the
- * official score/level/breakdowns come only from the submit response —
- * nothing is scored or reshaped here.
- *
- * State machine: "setup" | "running" | "finished".
- * - While running, <TestRunner> owns answers/index/timer state. Its `key`
- *   is the attempt id, so Start and Retake remount it fresh: no answers or
- *   timer ever leak between attempts.
- * - The countdown is a CLIENT-SIDE CONVENIENCE only; the backend does not
- *   enforce timing (time_limit_minutes is null).
- * - Leaving the page unmounts everything, so no stale test state remains.
+ * Assessment UI backed by server timing, state and scores.
+ * Session references/answer drafts survive refresh; official results are reloaded.
  */
-import { useCallback, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import AccessibleModal from "../components/AccessibleModal";
 import useTestTimer from "../hooks/useTestTimer";
 import TestTimer from "../components/TestTimer";
 import QuestionCard from "../components/QuestionCard";
 import QuestionNavigator from "../components/QuestionNavigator";
 import TestResult from "../components/TestResult";
+import { API_BASE_URL } from "../services/api";
 import {
   getMockQuestions,
+  getAssessment,
+  getAssessmentHistory,
   submitMockTest,
   formatDuration,
   SECONDS_PER_QUESTION,
 } from "../services/mockTest";
-import { DEMO_PROFILE_ID } from "../services/profileConfig";
+import { assessmentStorageKey, createAssessmentController } from "../services/assessmentSession";
+import { useStudentProfileContext } from "../hooks/useStudentProfileContext";
+import { useAuth } from '../hooks/useAuth';
 
-/**
- * Backend canonical skills (the question bank's 12 skills). There is no
- * tests-list endpoint yet, so this exact list is used for the selector.
- */
 const SKILL_OPTIONS = [
-  "Python",
-  "Java",
-  "C",
-  "C++",
-  "JavaScript",
-  "SQL",
-  "Data Structures",
-  "Algorithms",
-  "React",
-  "Machine Learning",
-  "HTML/CSS",
-  "Git",
+  "Python", "Java", "C", "C++", "JavaScript", "SQL",
+  "Data Structures", "Algorithms", "React", "Machine Learning", "HTML/CSS", "Git",
 ];
+const COUNT_OPTIONS = [5, 10, 25];
 
-/** Backend num_questions allows 1-10. */
-const COUNT_OPTIONS = [5, 10];
+function formatRemaining(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return hours + "h " + minutes + "m";
+  return minutes + "m " + (seconds % 60) + "s";
+}
 
-/**
- * Map a thrown service error to a user-readable message. The service
- * layer already produces readable text; this only catches unexpected
- * values so no stack trace or raw error object is ever rendered.
- */
-const toReadableError = (error) =>
-  error instanceof Error && error.message
-    ? error.message
-    : "Unable to process the assessment. Please try again.";
-
-/**
- * Internal running-test view. Remounted for every attempt (keyed by the
- * attempt id) so the timer and answers always start clean.
- */
-function TestRunner({
-  skill,
-  questions,
-  totalSeconds,
-  submitting,
-  submitError,
-  onRetrySubmit,
-  onFinish,
-  onExit,
-  latestAnswersRef,
-}) {
-  const [answers, setAnswers] = useState({});
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-
-  const finishRef = useCallback(
-    (byTime) => onFinish({ byTime, answers }),
-    [onFinish, answers]
-  );
-
-  // Client-side convenience countdown for the whole attempt; expiry
-  // auto-submits the latest answers (the hook keeps the callback in a ref,
-  // so this is never stale). Not server-enforced.
-  const timer = useTestTimer({
-    totalSeconds,
-    active: true,
-    onExpire: () => finishRef(true),
-  });
-
-  const handleSelectOption = (optionIndex) => {
-    const question = questions[currentIndex];
-    if (!question) return;
-    setAnswers((prev) => {
-      const next = { ...prev, [question.question_id]: optionIndex };
-      latestAnswersRef.current = next; // keep retry payload in sync
-      return next;
-    });
-  };
-
-  const answeredCount = Object.keys(answers).length;
-
+function RequestError({ state, onRetry, retryLabel = "Try Again", disabled = false }) {
+  if (!state.error) return null;
   return (
-    <div className="test-running">
-      <div className="test-running-header">
-        <div>
-          <span className="test-running-eyebrow">Mock Test</span>
-          <h1>{skill}</h1>
-        </div>
-        <div className="test-running-side">
-          <TestTimer secondsLeft={timer.secondsLeft} totalSeconds={totalSeconds} />
-          <button
-            type="button"
-            className="dash-btn secondary test-exit-btn"
-            onClick={() => setShowExitConfirm(true)}
-          >
-            Exit Test
-          </button>
-        </div>
-      </div>
-
-      {submitError && (
-        <div className="error-banner" role="alert">
-          <span>{submitError}</span>
-          <button type="button" className="dash-btn secondary" onClick={onRetrySubmit}>
-            Retry
-          </button>
-        </div>
-      )}
-
-      <div className="test-running-layout">
-        <QuestionCard
-          question={questions[currentIndex]}
-          index={currentIndex}
-          total={questions.length}
-          selectedOption={answers[questions[currentIndex].question_id]}
-          onSelectOption={handleSelectOption}
-          onPrevious={() => setCurrentIndex((index) => Math.max(0, index - 1))}
-          onNext={() =>
-            setCurrentIndex((index) => Math.min(questions.length - 1, index + 1))
-          }
-          onSubmit={() => setShowSubmitConfirm(true)}
-          isFirst={currentIndex === 0}
-          isLast={currentIndex === questions.length - 1}
-        />
-
-        <QuestionNavigator
-          total={questions.length}
-          currentIndex={currentIndex}
-          answers={answers}
-          questionIds={questions.map((q) => q.question_id)}
-          onJump={(index) => setCurrentIndex(index)}
-        />
-      </div>
-
-      {/* SUBMIT CONFIRMATION */}
-      {showSubmitConfirm && (
-        <div
-          className="modal-overlay"
-          onClick={() => {
-            if (!submitting) setShowSubmitConfirm(false);
-          }}
-          role="presentation"
-        >
-          <div
-            className="modal-card confirm-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="submit-confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <h2 id="submit-confirm-title">Submit Test</h2>
-            </div>
-
-            <p className="confirm-text">
-              {submitting
-                ? "Submitting your answers..."
-                : `You have answered ${answeredCount} of ${questions.length} questions. Are you sure you want to submit?`}
-            </p>
-
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="dash-btn secondary"
-                onClick={() => setShowSubmitConfirm(false)}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="dash-btn primary"
-                onClick={() => finishRef(false)}
-                disabled={submitting}
-              >
-                {submitting ? "Submitting..." : "Submit Test"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* EXIT CONFIRMATION */}
-      {showExitConfirm && (
-        <div
-          className="modal-overlay"
-          onClick={() => setShowExitConfirm(false)}
-          role="presentation"
-        >
-          <div
-            className="modal-card confirm-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="exit-confirm-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="modal-header">
-              <h2 id="exit-confirm-title">Exit Test</h2>
-            </div>
-
-            <p className="confirm-text">
-              Your current answers and timer will be lost. Do you want to exit
-              this test?
-            </p>
-
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="dash-btn secondary"
-                onClick={() => setShowExitConfirm(false)}
-              >
-                Cancel
-              </button>
-              <button type="button" className="dash-btn primary" onClick={onExit}>
-                Exit Test
-              </button>
-            </div>
-          </div>
-        </div>
+    <div className="error-banner" role="alert">
+      <span>
+        {state.error}
+        {state.cooldownSeconds > 0 && (
+          <> Time remaining: about {formatRemaining(state.cooldownSeconds)}.</>
+        )}
+      </span>
+      {onRetry && (
+        <button type="button" className="dash-btn secondary" onClick={onRetry}
+          disabled={disabled || state.starting || state.submitting || state.checking ||
+            state.cooldownSeconds > 0 || state.limitReached}>
+          {retryLabel}
+        </button>
       )}
     </div>
   );
 }
 
-function MockTests() {
-  const [phase, setPhase] = useState("setup");
-  const [skill, setSkill] = useState(SKILL_OPTIONS[0]);
-  const [count, setCount] = useState(5);
+function TestRunner({ state, controller, onExit, onCancelExit }) {
+  const { session, answers, submitting, checking } = state;
+  const questions = session.questions;
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const queuedExitConfirm = useRef(false);
+  const blocked = submitting || checking || state.locked || state.secondsLeft <= 0 ||
+    state.cooldownSeconds > 0 || state.limitReached;
+  const statusOnly = state.locked || state.secondsLeft <= 0 || state.errorStatus === 409;
 
-  const [attemptId, setAttemptId] = useState(0);
-  const [assessmentId, setAssessmentId] = useState(null);
-  const [questions, setQuestions] = useState([]);
-  const [startedAt, setStartedAt] = useState(null);
-  const [timeTaken, setTimeTaken] = useState(null);
-  const [autoSubmitted, setAutoSubmitted] = useState(false);
-  const [result, setResult] = useState(null);
-
-  // Request lifecycle for both start and submit.
-  const [starting, setStarting] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  // Synchronous guard so a timer-expiry auto-submit and a manual submit
-  // click can never call submitMockTest twice for the same assessment.
-  const submittingRef = useRef(false);
-
-  // Mirrors the runner's current answers so a failed submission can be
-  // retried without losing what the student has selected.
-  const latestAnswersRef = useRef({});
-
-  const totalSeconds = Math.max(60, count * SECONDS_PER_QUESTION);
-
-  const handleStartTest = useCallback(async () => {
-    setError(null);
-    setStarting(true);
-    setResult(null);
-    setAutoSubmitted(false);
-
-    try {
-      // Starts a REAL backend assessment (also the retake path: a fresh
-      // assessment is created every time, never the previous one reused).
-      const assessment = await getMockQuestions(DEMO_PROFILE_ID, skill, count);
-
-      const backendQuestions = Array.isArray(assessment?.questions)
-        ? assessment.questions
-        : null;
-
-      if (
-        !assessment?.assessment_id ||
-        !backendQuestions ||
-        backendQuestions.length === 0
-      ) {
-        throw new Error(
-          "The assessment service returned no questions. Please try again."
-        );
-      }
-
-      setAssessmentId(assessment.assessment_id);
-      setQuestions(backendQuestions);
-      setStartedAt(Date.now());
-      setTimeTaken(null);
-      setAttemptId((id) => id + 1); // remounts TestRunner: fresh timer/answers
-      setPhase("running");
-    } catch (startError) {
-      setError(toReadableError(startError));
-    } finally {
-      setStarting(false);
+  const closeSubmitConfirm = () => {
+    setShowSubmitConfirm(false);
+    if (queuedExitConfirm.current) {
+      queuedExitConfirm.current = false;
+      setShowExitConfirm(true);
     }
-  }, [skill, count]);
-
-  const backToSetup = () => {
-    setPhase("setup");
-    setAssessmentId(null);
-    setQuestions([]);
-    setResult(null);
-    setAutoSubmitted(false);
-    setError(null);
   };
 
-  const finishTest = useCallback(
-    async ({ byTime, answers }) => {
-      if (submittingRef.current) return; // a submission is already in flight
-      submittingRef.current = true;
+  const cancelExit = () => {
+    setShowExitConfirm(false);
+    onCancelExit?.();
+  };
 
-      const elapsed = startedAt
-        ? Math.min(totalSeconds, Math.round((Date.now() - startedAt) / 1000))
-        : totalSeconds;
-      setTimeTaken(byTime ? totalSeconds : elapsed);
-      if (byTime) setAutoSubmitted(true);
+  useEffect(() => {
+    const requestLeave = () => {
+      if (showSubmitConfirm) queuedExitConfirm.current = true;
+      else setShowExitConfirm(true);
+    };
+    window.addEventListener("placepro:request-assessment-leave", requestLeave);
+    return () => window.removeEventListener("placepro:request-assessment-leave", requestLeave);
+  }, [showSubmitConfirm]);
 
-      setSubmitting(true);
-      setError(null);
+  return (
+    <div className="test-running">
+      <div className="test-running-header">
+        <div>
+          <span className="test-running-eyebrow">Mock Test · Attempt {session.attempt}</span>
+          <h1>{session.skill}</h1>
+        </div>
+        <div className="test-running-side">
+          <TestTimer secondsLeft={state.secondsLeft} totalSeconds={state.totalSeconds} />
+          <button type="button" className="dash-btn secondary test-exit-btn"
+            onClick={() => setShowExitConfirm(true)}>
+            Leave Test
+          </button>
+        </div>
+      </div>
 
-      try {
-        // The service converts option indexes to answer text and calls
-        // the backend; the returned result is authoritative and is stored
-        // as-is (no local score/percentage/breakdowns are computed).
-        const backendResult = await submitMockTest(
-          assessmentId,
-          questions,
-          answers,
-          DEMO_PROFILE_ID
-        );
-        setResult(backendResult);
-        setPhase("finished");
-      } catch (submitError) {
-        // Submission failed: stay in the running phase with the answers
-        // intact and let the runner show the error with a Retry option.
-        setError(toReadableError(submitError));
-      } finally {
-        submittingRef.current = false;
-        setSubmitting(false);
-      }
-    },
-    [assessmentId, questions, startedAt, totalSeconds]
+      {submitting && (
+        <div className="demo-banner auto-submit-note" role="status">
+          {state.autoAttempted
+            ? "The deadline is approaching. Submitting your available answers..."
+            : "Submitting your answers. Waiting for confirmation..."}
+        </div>
+      )}
+      {checking && (
+        <div className="demo-banner" role="status">Checking the saved assessment status...</div>
+      )}
+      <RequestError state={state}
+        onRetry={statusOnly ? () => controller.checkStatus() : controller.retrySubmission}
+        retryLabel={statusOnly ? "Check Status" : "Retry Submission"} />
+
+      <div className="test-running-layout">
+        <QuestionCard question={questions[currentIndex]} index={currentIndex}
+          total={questions.length} selectedOption={answers[questions[currentIndex].question_id]}
+          onSelectOption={(index) => controller.selectAnswer(questions[currentIndex].question_id, index)}
+          onPrevious={() => setCurrentIndex((index) => Math.max(0, index - 1))}
+          onNext={() => setCurrentIndex((index) => Math.min(questions.length - 1, index + 1))}
+          onSubmit={() => setShowSubmitConfirm(true)}
+          isFirst={currentIndex === 0} isLast={currentIndex === questions.length - 1}
+          disabled={blocked} />
+        <QuestionNavigator total={questions.length} currentIndex={currentIndex}
+          answers={answers} questionIds={questions.map((q) => q.question_id)}
+          onJump={setCurrentIndex} />
+      </div>
+
+      {showSubmitConfirm && (
+        <AccessibleModal
+          className="modal-card confirm-card"
+          labelledBy="submit-confirm-title"
+          describedBy="submit-confirm-description"
+          closeBlocked={submitting}
+          onEscape={closeSubmitConfirm}
+          onBackdropClose={closeSubmitConfirm}
+        >
+            <div className="modal-header"><h2 id="submit-confirm-title">Submit Test</h2></div>
+            <p id="submit-confirm-description" className="confirm-text" role={submitting ? "status" : undefined}>
+              {submitting
+                ? "Submitting your answers..."
+                : "You have answered " + Object.keys(answers).length + " of " + questions.length +
+                  " questions. Are you sure you want to submit?"}
+            </p>
+            {state.error && <p role="alert">{state.error}</p>}
+            <div className="modal-actions">
+              <button type="button" className="dash-btn secondary"
+                onClick={closeSubmitConfirm} disabled={submitting} data-modal-initial-focus>Cancel</button>
+              <button type="button" className="dash-btn primary" disabled={blocked}
+                onClick={async () => { await controller.submit(); closeSubmitConfirm(); }}>
+                {submitting ? "Submitting..." : "Submit Test"}
+              </button>
+            </div>
+        </AccessibleModal>
+      )}
+
+      {showExitConfirm && (
+        <AccessibleModal
+          className="modal-card confirm-card"
+          labelledBy="exit-confirm-title"
+          describedBy="exit-confirm-description"
+          onEscape={cancelExit}
+          onBackdropClose={cancelExit}
+        >
+            <div className="modal-header"><h2 id="exit-confirm-title">Leave Test</h2></div>
+            <p id="exit-confirm-description" className="confirm-text">
+              Your answers are kept in this tab. The assessment deadline continues while you are away.
+              Return to Mock Tests to continue.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="dash-btn secondary"
+                onClick={cancelExit} data-modal-initial-focus>Cancel</button>
+              <button type="button" className="dash-btn primary"
+                onClick={() => { setShowExitConfirm(false); onExit(); }}>Leave Test</button>
+            </div>
+        </AccessibleModal>
+      )}
+    </div>
   );
+}
+
+function AssessmentFlow({ profileId, accountId, onCompleted, onNavigate, onAssessmentStateChange,
+  onAssessmentLeaveConfirmed, onAssessmentLeaveCancelled }) {
+  const [controller] = useState(() => createAssessmentController({
+    profileId,
+    api: { start: getMockQuestions, submit: submitMockTest, get: getAssessment, history: getAssessmentHistory },
+    storageKey: assessmentStorageKey(profileId, API_BASE_URL, accountId),
+    onCompleted,
+  }));
+  const state = useTestTimer(controller);
+  useEffect(() => {
+    onAssessmentStateChange?.({
+      active: state.phase === "loading" || state.phase === "running" || state.starting || state.submitting || state.checking,
+      dialogAvailable: state.phase === "running" && state.session?.questions?.length > 0,
+    });
+  }, [onAssessmentStateChange, state.checking, state.phase, state.session?.questions?.length, state.starting, state.submitting]);
+  const startDisabled = state.starting || state.submitting || state.checking ||
+    state.cooldownSeconds > 0 || state.limitReached;
+  const toSetup = () => controller.configure(state.skill, state.count);
 
   return (
     <div className="mocktests-page">
-      {/* ===================== SETUP PHASE ===================== */}
-      {phase === "setup" && (
+      {state.storageWarning && (
+        <div className="demo-banner" role="status">{state.storageWarning}</div>
+      )}
+
+      {state.phase === "loading" && (
+        <div className="prediction-card" role="status">Loading saved assessment...</div>
+      )}
+
+      {state.phase === "unavailable" && (
+        <div className="prediction-card">
+          <h1>Assessment unavailable</h1>
+          <RequestError state={state} onRetry={controller.restore} retryLabel="Check Status" />
+          <button type="button" className="dash-btn secondary" onClick={toSetup}>
+            Test Configuration
+          </button>
+        </div>
+      )}
+
+      {state.phase === "setup" && (
         <>
           <div className="page-header">
             <h1>Mock Tests</h1>
-            <p>
-              Practice placement-focused questions, test your knowledge, and
-              identify areas for improvement.
-            </p>
+            <p>Practice placement-focused questions, test your knowledge, and identify areas for improvement.</p>
           </div>
-
           <div className="prediction-card test-setup-card">
             <h2>Test Configuration</h2>
-            <p className="form-description">
-              Choose a skill and the number of questions, then start the
-              assessment.
-            </p>
-
+            <p className="form-description">Choose a skill and the number of questions, then start the assessment.</p>
             <div className="test-setup-grid">
               <div className="form-group">
                 <label htmlFor="test-skill">Skill</label>
-                <select
-                  id="test-skill"
-                  value={skill}
-                  onChange={(event) => setSkill(event.target.value)}
-                >
-                  {SKILL_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
+                <select id="test-skill" value={state.skill} disabled={state.starting}
+                  onChange={(event) => controller.configure(event.target.value, state.count)}>
+                  {SKILL_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
-
               <div className="form-group">
                 <label htmlFor="test-count">Number of Questions</label>
-                <select
-                  id="test-count"
-                  value={count}
-                  onChange={(event) => setCount(Number(event.target.value))}
-                >
-                  {COUNT_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
+                <select id="test-count" value={state.count} disabled={state.starting}
+                  onChange={(event) => controller.configure(state.skill, Number(event.target.value))}>
+                  {COUNT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
             </div>
-
             <div className="test-summary">
+              <div className="test-summary-row"><span>Skill</span><strong>{state.skill}</strong></div>
+              <div className="test-summary-row"><span>Number of Questions</span><strong>{state.count}</strong></div>
               <div className="test-summary-row">
-                <span>Skill</span>
-                <strong>{skill}</strong>
-              </div>
-              <div className="test-summary-row">
-                <span>Number of Questions</span>
-                <strong>{count}</strong>
-              </div>
-              <div className="test-summary-row">
-                <span>Estimated Time</span>
-                <strong>
-                  {Math.max(1, Math.round(totalSeconds / 60))} minute
-                  {totalSeconds >= 90 ? "s" : ""}
-                </strong>
+                <span>Estimated Time</span><strong>{state.count * SECONDS_PER_QUESTION / 60} minutes</strong>
               </div>
             </div>
-
-            {error && (
-              <div className="error-banner" role="alert">
-                <span>{error}</span>
-                <button
-                  type="button"
-                  className="dash-btn secondary"
-                  onClick={handleStartTest}
-                >
-                  Try Again
-                </button>
-              </div>
-            )}
-
-            <button
-              type="button"
-              className="predict-button"
-              onClick={handleStartTest}
-              disabled={starting}
-            >
-              <span>{starting ? "Starting Test..." : "Start Test"}</span>
+            <p className="form-description">
+              The server sets the deadline. Answers are submitted automatically as that deadline approaches.
+            </p>
+            <RequestError state={state} onRetry={controller.startNew} />
+            <button type="button" className="predict-button" onClick={controller.startNew}
+              disabled={startDisabled}>
+              <span>{state.starting ? "Starting Test..." : "Start Test"}</span>
             </button>
+            {state.result && (
+              <button type="button" className="dash-btn secondary" onClick={controller.showResult}>
+                View Completed Result
+              </button>
+            )}
           </div>
         </>
       )}
 
-      {/* ===================== RUNNING PHASE ===================== */}
-      {phase === "running" && assessmentId && questions.length > 0 && (
-        <TestRunner
-          key={attemptId}
-          skill={skill}
-          questions={questions}
-          totalSeconds={totalSeconds}
-          submitting={submitting}
-          submitError={error}
-          onRetrySubmit={() =>
-            finishTest({ byTime: false, answers: latestAnswersRef.current })
-          }
-          onFinish={finishTest}
-          onExit={backToSetup}
-          latestAnswersRef={latestAnswersRef}
-        />
+      {state.phase === "running" && state.session?.questions?.length > 0 && (
+        <TestRunner key={state.session.assessment_id} state={state} controller={controller}
+          onExit={onAssessmentLeaveConfirmed} onCancelExit={onAssessmentLeaveCancelled} />
       )}
 
-      {/* ===================== RESULT PHASE ===================== */}
-      {phase === "finished" && result && (
+      {state.phase === "expired" && (
+        <div className="prediction-card">
+          <h1>Assessment Expired</h1>
+          <RequestError state={state} />
+          <p>No late answers were scored. Completed results remain in your assessment history.</p>
+          <button type="button" className="dash-btn primary" onClick={toSetup}>Test Configuration</button>
+        </div>
+      )}
+
+      {state.phase === "finished" && state.result && (
         <>
-          {autoSubmitted && (
+          {state.starting && (
+            <div className="demo-banner" role="status">Starting a new assessment. Your previous result is saved.</div>
+          )}
+          {state.autoSubmitted && (
             <div className="demo-banner auto-submit-note" role="status">
-              <span>Time is up. Your answers were submitted.</span>
+              Your deadline submission has been confirmed.
             </div>
           )}
-          <TestResult
-            result={result}
-            skill={skill}
-            timeTaken={formatDuration(timeTaken)}
-            onRetake={handleStartTest}
-            onNavigate={backToSetup}
-          />
+          <RequestError state={state} onRetry={controller.startNew} retryLabel="Retry Retake" />
+          <TestResult result={state.result} skill={state.result.skill}
+            timeTaken={state.timeTakenSeconds === null ? undefined : formatDuration(state.timeTakenSeconds)}
+            onRetake={controller.startNew} retaking={state.starting} retakeDisabled={startDisabled}
+            onNavigate={onNavigate} />
+          <button type="button" className="dash-btn secondary" onClick={toSetup}
+            disabled={state.starting}>Test Configuration</button>
         </>
       )}
     </div>
   );
+}
+
+function MockTests({ onNavigate, onAssessmentStateChange, onAssessmentLeaveConfirmed, onAssessmentLeaveCancelled }) {
+  const { profileId, rawProfile, error, refetch } = useStudentProfileContext();
+  const { account } = useAuth();
+  if (!profileId || !rawProfile || error) return <div className="prediction-card">
+    <h1>Mock Tests</h1><p>Create or select an available profile before starting an assessment.</p>
+    <button type="button" className="dash-btn primary" onClick={() => onNavigate?.('profile')}>Student Profile</button>
+  </div>;
+  // Key by identity: another profile cannot display this student's answers or result.
+  return <AssessmentFlow key={profileId} profileId={profileId} accountId={account.account_id}
+    onCompleted={refetch} onNavigate={onNavigate} onAssessmentStateChange={onAssessmentStateChange}
+    onAssessmentLeaveConfirmed={onAssessmentLeaveConfirmed} onAssessmentLeaveCancelled={onAssessmentLeaveCancelled} />;
 }
 
 export default MockTests;

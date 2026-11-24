@@ -23,9 +23,9 @@ import {
   fetchAssessment,
   fetchAssessmentHistory,
   fetchSkillsView,
-} from "./api";
+} from "./api.js";
 
-/** Demo timing rule kept for the existing UI: about 1 minute per question. */
+/** Setup estimate only. Active attempts use the server's expires_at. */
 export const SECONDS_PER_QUESTION = 60;
 
 /* ================================================================
@@ -65,8 +65,8 @@ export function getDifficulties() {
  * Signature change vs the demo: (profileId, skill, count) — MockTests.jsx
  * still needs Step 3 to pass the profile id and skill name.
  */
-export async function getMockQuestions(profileId, skill, count) {
-  return startAssessment(profileId, skill, count);
+export async function getMockQuestions(profileId, skill, count, requestId) {
+  return startAssessment(profileId, skill, count, requestId);
 }
 
 /* ================================================================
@@ -119,9 +119,9 @@ export function buildAnswerPayload(questions, answers) {
  * submitAssessment(). No score, level, or breakdown is computed here —
  * the backend response is returned as-is.
  */
-export async function submitMockTest(assessmentId, questions, answers, profileId) {
+export async function submitMockTest(assessmentId, questions, answers, profileId, requestId) {
   const answerPayload = buildAnswerPayload(questions, answers);
-  return submitAssessment(assessmentId, profileId, answerPayload.answers);
+  return submitAssessment(assessmentId, profileId, answerPayload.answers, requestId);
 }
 
 /* ================================================================

@@ -32,7 +32,7 @@ class PerformanceServiceError(Exception):
     status_code = 422
 
 
-def get_performance(profile_id: str) -> dict:
+def get_performance(profile_id: str, *, snapshot=None) -> dict:
     """Consolidated performance analytics for a VERIFIED profile.
 
     Raises ProfileNotFoundError (404) / InvalidProfileError (422)
@@ -40,16 +40,16 @@ def get_performance(profile_id: str) -> dict:
     (422) when the profile is not verified - matching the Phase
     12-17 endpoint convention.
     """
-    from .assessment_service import combined_skill_view
+    from .assessment_service import skills_for_profile
     from .profile_service import (
         ProfileNotFoundError,
         ProfileServiceError,
         get_profile,
     )
-    from .readiness_service import get_readiness
+    from .readiness_service import readiness_for_profile
 
     # 404 / invalid-id behavior comes from the existing store.
-    profile, _ = get_profile(profile_id)
+    profile = snapshot if snapshot is not None else get_profile(profile_id)[0]
 
     if not profile.get("verified"):
         raise PerformanceServiceError(
@@ -57,10 +57,10 @@ def get_performance(profile_id: str) -> dict:
         )
 
     # --- Phase 12 readiness (delegated, recomputed live) ----------
-    readiness = get_readiness(profile_id)
+    readiness = readiness_for_profile(profile)
 
     # --- Phase 17 combined skill view (delegated) -----------------
-    skills_view = combined_skill_view(profile_id)
+    skills_view = skills_for_profile(profile)
 
     # --- Phase 11 prediction history summary ----------------------
     history = profile.get("prediction_history") or []
@@ -70,6 +70,9 @@ def get_performance(profile_id: str) -> dict:
         "latest_prediction": history[-1]["prediction"] if history else None,
         "latest_probability": probabilities[-1] if history else None,
         "latest_timestamp": history[-1]["timestamp"] if history else None,
+        "latest_source_revision": history[-1].get('source_revision') if history else None,
+        "latest_is_current": (history[-1].get('source_revision') == profile.get('revision', 0))
+            if history and history[-1].get('source_revision') is not None else None,
         "highest_probability": max(probabilities) if history else None,
         "lowest_probability": min(probabilities) if history else None,
     }
@@ -91,6 +94,7 @@ def get_performance(profile_id: str) -> dict:
 
     return {
         "profile_id": profile["profile_id"],
+        "source_revision": profile.get('revision', 0),
         "verified": bool(profile.get("verified")),
         "summary": {
             "predictions": prediction_summary,

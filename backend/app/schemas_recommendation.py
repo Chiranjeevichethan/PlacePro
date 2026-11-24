@@ -32,7 +32,7 @@ class RecommendationItem(BaseModel):
     recommendation_score: float
     eligibility_status: str  # ELIGIBLE / NOT_ELIGIBLE / INCOMPLETE
     skill_match: SkillMatch = Field(default_factory=SkillMatch)
-    readiness_score: int = 0
+    readiness_score: float = Field(default=0, ge=0, le=100, allow_inf_nan=False)
     readiness_level: str = ""
     placement_probability: Optional[float] = None
     reasons: List[str] = Field(default_factory=list)
@@ -49,4 +49,5 @@ class RecommendationGroups(BaseModel):
 
 class RecommendationsResponse(BaseModel):
     profile_id: str
+    source_revision: Optional[int] = None
     recommendations: RecommendationGroups

@@ -1,9 +1,15 @@
 import IconMark from "./IconMark";
 import Logo from "./Logo";
+import { appHrefForPage, handleAppLinkClick } from "../services/appRoutes.js";
 
 const menuItems = [
   { page: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { page: "readiness", label: "Career Readiness", icon: "academic" },
+  { page: "goals", label: "Goals & Milestones", icon: "objective" },
+  { page: "notifications", label: "Notifications", icon: "notifications" },
+  { page: "resume", label: "Resume Builder", icon: "experience" },
   { page: "prediction", label: "Placement Prediction", icon: "prediction" },
+  { page: "experimental-v1", label: "Experimental V1 Model", icon: "prediction" },
   { page: "salary", label: "Salary Prediction", icon: "salary" },
   { page: "companies", label: "Company Recommendations", icon: "company" },
   { page: "skillgap", label: "Skill Gap Analysis", icon: "skills" },
@@ -25,14 +31,11 @@ function Sidebar({ currentPage, setCurrentPage }) {
       <nav className="sidebar-menu" aria-label="Primary navigation">
         {menuItems.map((item) => (
           <a
+            href={appHrefForPage(item.page)}
             key={item.page}
-            href="#"
             className={currentPage === item.page ? "active" : ""}
             aria-current={currentPage === item.page ? "page" : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              setCurrentPage(item.page);
-            }}
+            onClick={(event) => handleAppLinkClick(event, item.page, setCurrentPage)}
           >
             <IconMark name={item.icon} className="sidebar-icon" />
             <span>{item.label}</span>
@@ -80,3 +83,4 @@ function Sidebar({ currentPage, setCurrentPage }) {
 }
 
 export default Sidebar;
+

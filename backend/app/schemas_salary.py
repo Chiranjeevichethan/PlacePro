@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -7,10 +9,21 @@ class SalaryPredictionRequest(BaseModel):
     The salary model itself uses only 12 of these fields. The remaining
     four fields are accepted for compatibility with the existing frontend
     payload but are intentionally not used by the salary model.
+
+    ``college_tier`` is OPTIONAL: the salary page no longer collects it.
+    Missing / null / empty values are resolved by the service to its
+    configurable default (see DEFAULT_COLLEGE_TIER) before the features
+    reach the model, so the model input structure is unchanged.
     """
 
     branch: str = Field(description="Canonical engineering branch")
-    college_tier: str = Field(description="Canonical college tier")
+    college_tier: Optional[str] = Field(
+        default=None,
+        description=(
+            "Canonical college tier (Tier-1 / Tier-2 / Tier-3). Optional: "
+            "omitted, null, or empty values resolve to the service default."
+        ),
+    )
     cgpa: float = Field(ge=0.0, le=10.0)
     backlogs: int = Field(ge=0)
     coding_skills: float = Field(ge=0.0, le=10.0)

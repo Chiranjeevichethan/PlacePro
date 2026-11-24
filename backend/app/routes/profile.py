@@ -11,7 +11,7 @@
 #
 # ============================================================
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
 from ..schemas_profile import (
     ProfileFromResumeResponse,
@@ -182,7 +182,7 @@ def profile_update(profile_id: str, profile: StudentProfile):
     response_model=ProfilePredictionResponse,
     summary="Predict placement for a verified, complete profile (Phase 8 model)",
 )
-def profile_predict(profile_id: str):
+def profile_predict(profile_id: str, idempotency_key: str | None = Header(default=None, max_length=128)):
     """Predict placement using the existing Phase 8 final model.
 
     Guards (model is NEVER called otherwise):
@@ -195,7 +195,7 @@ def profile_predict(profile_id: str):
     client cannot choose a model.
     """
     try:
-        return predict_for_profile(profile_id)
+        return predict_for_profile(profile_id, request_id=idempotency_key)
     except ProfileServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - defensive

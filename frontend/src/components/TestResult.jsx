@@ -94,7 +94,7 @@ function toBreakdownList(breakdown) {
   return [];
 }
 
-function TestResult({ result, skill, timeTaken, onRetake, onNavigate }) {
+function TestResult({ result, skill, timeTaken, onRetake, onNavigate, retaking = false, retakeDisabled = false }) {
   const scoreValue = Number(result?.skill_score);
   const hasScore = Number.isFinite(scoreValue);
   const level = isDisplayable(result?.level) ? result.level : null;
@@ -161,8 +161,9 @@ function TestResult({ result, skill, timeTaken, onRetake, onNavigate }) {
                 type="button"
                 className="dash-btn primary"
                 onClick={onRetake}
+                disabled={retaking || retakeDisabled}
               >
-                Retake Test
+                {retaking ? "Starting Retake..." : "Retake Test"}
               </button>
             </div>
           </div>
@@ -176,8 +177,9 @@ function TestResult({ result, skill, timeTaken, onRetake, onNavigate }) {
                 type="button"
                 className="dash-btn primary"
                 onClick={onRetake}
+                disabled={retaking || retakeDisabled}
               >
-                Retake Test
+                {retaking ? "Starting Retake..." : "Retake Test"}
               </button>
             </div>
           </div>

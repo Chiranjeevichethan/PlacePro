@@ -30,12 +30,15 @@
 #
 # ============================================================
 
-import re
-
 from .profile_service import get_profile
+from .score_levels import classify_percentage
+from .skill_evidence import (
+    assessment_readiness_bonus,
+    resolve_skill_evidence,
+    skill_status,
+)
 from .skill_taxonomy import (
     PLACEMENT_REQUIREMENTS,
-    normalize_skill,
     skill_category,
 )
 
@@ -52,10 +55,10 @@ class ReadinessServiceError(Exception):
 # READINESS LEVELS (documented, transparent)
 # ------------------------------------------------------------
 READINESS_LEVELS = [
-    (0, 39, "Needs Improvement"),
-    (40, 59, "Developing"),
-    (60, 74, "Placement Ready"),
-    (75, 89, "Strong"),
+    (0, 40, "Needs Improvement"),
+    (40, 60, "Developing"),
+    (60, 75, "Placement Ready"),
+    (75, 90, "Strong"),
     (90, 100, "Highly Ready"),
 ]
 
@@ -107,103 +110,9 @@ _CERTIFICATION_LEVELS = [(0, 0), (1, 4), (2, 8)]
 # ------------------------------------------------------------
 
 
-def _section_source(profile, section):
-    """'resume' or 'user' for a profile section, based on provenance.
-
-    Provenance paths are dotted (e.g. "skills.programming_languages"),
-    so we match the section as a path prefix.
-    """
-    provenance = profile.get("provenance") or {}
-
-    def match(paths):
-        return any(
-            p == section or p.startswith(section + ".")
-            for p in paths
-        )
-
-    if match(provenance.get("user", [])):
-        return "user"
-    if match(provenance.get("resume", [])):
-        return "resume"
-    return "profile"
-
-
 def collect_verified_skills(profile: dict) -> list:
-    """Gather every skill mention from a verified profile.
-
-    Each entry: {skill, category, source, verified, original}.
-
-    Sources (all from the verified profile - nothing invented):
-      - profile.skills.* lists       -> source "resume"/"user" via
-                                        provenance
-      - projects[].technologies      -> "projects"
-      - internships[].technologies   -> "internships"
-      - experience[].technologies    -> "experience"
-      - certifications[].name        -> "certifications" (alias scan)
-    """
-    entries = []
-
-    def add(raw, source):
-        if not raw:
-            return
-        for canonical in normalize_skill(raw):
-            entries.append(
-                {
-                    "skill": canonical,
-                    "category": skill_category(canonical),
-                    "source": source,
-                    "verified": bool(profile.get("verified")),
-                    "original": str(raw).strip(),
-                }
-            )
-
-    skills = profile.get("skills") or {}
-    skills_source = _section_source(profile, "skills")
-    for category_list in skills.values():
-        if isinstance(category_list, list):
-            for raw in category_list:
-                add(raw, skills_source)
-
-    for item in profile.get("projects") or []:
-        for raw in (item.get("technologies") or []):
-            add(raw, "projects")
-
-    for item in profile.get("internships") or []:
-        for raw in (item.get("technologies") or []):
-            add(raw, "internships")
-
-    for item in profile.get("experience") or []:
-        for raw in (item.get("technologies") or []):
-            add(raw, "experience")
-
-    for cert in profile.get("certifications") or []:
-        name = cert.get("name")
-        if not name:
-            continue
-        # Certification names often embed taxonomy skills
-        # ("AWS Certified Solutions Architect" -> AWS). Exact match
-        # first, then a token-level scan so "AWS" is found without
-        # fuzzy-matching unrelated words.
-        canonicals = normalize_skill(name)
-        if not canonicals:
-            for token in re.split(r"[^A-Za-z0-9+#.]+", str(name)):
-                canonicals.extend(normalize_skill(token))
-        added = set()
-        for canonical in canonicals:
-            if canonical in added:
-                continue  # dedupe within one certification name
-            added.add(canonical)
-            entries.append(
-                {
-                    "skill": canonical,
-                    "category": skill_category(canonical),
-                    "source": "certifications",
-                    "verified": bool(profile.get("verified")),
-                    "original": str(name).strip(),
-                }
-            )
-
-    return entries
+    """Compatibility wrapper returning evidence that satisfies the shared policy."""
+    return resolve_skill_evidence(profile)["accepted_entries"]
 
 
 # ------------------------------------------------------------
@@ -236,6 +145,8 @@ def compute_strengths(skill_entries: list, limit: int = 5) -> list:
                 evidence.append(f"{count} experience role{'s' if count != 1 else ''}")
             elif source == "certifications":
                 evidence.append("certification")
+            elif source == "assessment":
+                evidence.append("qualifying PlacePro assessment")
             else:
                 evidence.append(f"listed in {source} skills")
         strengths.append(
@@ -261,7 +172,7 @@ def compute_strengths(skill_entries: list, limit: int = 5) -> list:
 # profile - not because the student is presumed not to know it.
 
 
-def compute_skill_gaps(skill_entries: list) -> list:
+def compute_skill_gaps(skill_entries: list, evidence=None) -> list:
     present = {entry["skill"] for entry in skill_entries}
     gaps = []
     for req in PLACEMENT_REQUIREMENTS:
@@ -286,6 +197,18 @@ def compute_skill_gaps(skill_entries: list) -> list:
                     "action": req["action"],
                 }
             )
+    for gap in gaps:
+        requirement = next(req for req in PLACEMENT_REQUIREMENTS if req["skill"] == gap["skill"])
+        names = requirement.get("skills_any") or [gap["skill"]]
+        statuses = [skill_status(evidence, name) for name in names] if evidence else ['MISSING']
+        status = next((s for s in ('INSUFFICIENT', 'INVALID', 'UNCONFIRMED') if s in statuses), 'MISSING')
+        gap["evidence_status"] = status
+        if status == 'INSUFFICIENT':
+            gap["reason"] = "Latest verified PlacePro assessment evidence is below the qualifying score of 60"
+        elif status == 'INVALID':
+            gap["reason"] = "Recorded assessment evidence has an invalid score or source; skill evidence cannot be confirmed"
+        elif status == 'UNCONFIRMED':
+            gap["reason"] = "Recorded skill evidence has not been confirmed"
     return gaps
 
 
@@ -322,7 +245,7 @@ def _points_for(count: int, levels) -> int:
     return points
 
 
-def compute_readiness_score(profile: dict, skill_entries: list) -> dict:
+def compute_readiness_score(profile: dict, skill_entries: list, evidence=None) -> dict:
     """Compute the 0-100 readiness score + documented breakdown.
 
     Returns {readiness_score, breakdown:{...}} where breakdown sums
@@ -369,7 +292,7 @@ def compute_readiness_score(profile: dict, skill_entries: list) -> dict:
     # Only the LATEST score per skill counts (repeated attempts can
     # not inflate the bonus - a student who retries and scores lower
     # gets the lower latest score, and the bonus is capped at 5 pts).
-    assessment_bonus = _assessment_bonus(profile)
+    assessment_bonus = assessment_readiness_bonus(evidence or resolve_skill_evidence(profile))
     technical = min(technical + assessment_bonus,
                     READINESS_WEIGHTS["technical_skills"])
 
@@ -381,7 +304,7 @@ def compute_readiness_score(profile: dict, skill_entries: list) -> dict:
         "communication": communication,
         "profile_completeness": profile_points,
     }
-    score = min(100, sum(breakdown.values()))
+    score = round(min(100, sum(breakdown.values())), 1)
     return {"readiness_score": score, "breakdown": breakdown}
 
 
@@ -389,25 +312,14 @@ def _assessment_bonus(profile: dict) -> float:
     """Capped readiness bonus from verified assessment evidence.
 
     Uses the LATEST score per assessed skill only; scores below 60
-    (Developing/Beginner) contribute 0. Documented in
-    docs/phase17_skill_assessment.md.
+    (Developing/Beginner) contribute no bonus. See docs/skill-evidence-policy.md.
     """
-    from .assessment_service import ASSESSMENT_READINESS_BONUS_MAX, get_assessment_evidence
-
-    latest = get_assessment_evidence(profile)
-    qualifying = [e["score"] for e in latest if (e.get("score") or 0) >= 60]
-    if not qualifying:
-        return 0.0
-    avg = sum(qualifying) / len(qualifying)
-    return round(min(ASSESSMENT_READINESS_BONUS_MAX, avg / 100 * ASSESSMENT_READINESS_BONUS_MAX), 1)
+    return assessment_readiness_bonus(resolve_skill_evidence(profile))
 
 
-def readiness_level(score: int) -> str:
+def readiness_level(score: float) -> str:
     """Map a readiness score to a documented level."""
-    for low, high, label in READINESS_LEVELS:
-        if low <= score <= high:
-            return label
-    return "Needs Improvement"  # defensive fallback
+    return classify_percentage(score, READINESS_LEVELS)
 
 
 # ------------------------------------------------------------
@@ -456,16 +368,23 @@ def get_readiness(profile_id: str) -> dict:
        skill_gaps, improvement_plan, profile_completeness}
     """
     profile, _ = get_profile(profile_id)
+    return readiness_for_profile(profile)
+
+
+def readiness_for_profile(profile: dict, evidence=None) -> dict:
+    """Analyze one loaded snapshot, shared with recommendation orchestration."""
     _require_verified(profile)
 
-    skill_entries = collect_verified_skills(profile)
+    evidence = evidence or resolve_skill_evidence(profile)
+    skill_entries = evidence["accepted_entries"]
     strengths = compute_strengths(skill_entries)
-    gaps = compute_skill_gaps(skill_entries)
-    score_result = compute_readiness_score(profile, skill_entries)
+    gaps = compute_skill_gaps(skill_entries, evidence)
+    score_result = compute_readiness_score(profile, skill_entries, evidence)
     completeness = _profile_completeness(profile)
 
     return {
         "profile_id": profile["profile_id"],
+        "source_revision": profile.get('revision', 0),
         "readiness_score": score_result["readiness_score"],
         "readiness_level": readiness_level(score_result["readiness_score"]),
         "readiness_breakdown": score_result["breakdown"],
@@ -476,22 +395,24 @@ def get_readiness(profile_id: str) -> dict:
     }
 
 
-def get_placement_summary(profile_id: str) -> dict:
+def get_placement_summary(profile_id: str, *, snapshot=None) -> dict:
     """Combined view: Phase 11 ML prediction + Phase 12 readiness.
 
     The two scores are NEVER merged - they measure different
     things and are reported side by side. The prediction goes
-    through the exact Phase 11 flow (verified -> complete ->
-    src.pipeline.predict_placement), so history is recorded
-    exactly as Phase 11 does.
+    through the verified/complete model gate on the same snapshot.
+    This GET does not append prediction history.
     """
-    readiness = get_readiness(profile_id)  # also enforces verified
+    profile = snapshot if snapshot is not None else get_profile(profile_id)[0]
+    readiness = readiness_for_profile(profile)
 
-    from .profile_service import predict_for_profile
+    from .profile_service import prediction_for_snapshot
 
-    prediction = predict_for_profile(profile_id)
+    prediction = prediction_for_snapshot(profile)
 
     return {
+        "profile_id": profile_id,
+        "source_revision": profile.get('revision', 0),
         "ready_for_prediction": prediction["ready_for_prediction"],
         "prediction": prediction.get("prediction"),
         "placement_probability": prediction.get("placement_probability"),
