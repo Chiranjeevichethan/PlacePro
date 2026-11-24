@@ -1,0 +1,121 @@
+{
+  "model_version": "placepro-experimental-v1-16-inputs",
+  "sklearn_version": "1.9.0",
+  "model_type": "Logistic Regression",
+  "dataset": "placepro_improved_synthetic_dataset.csv",
+  "dataset_rows": 100000,
+  "training_rows": 80000,
+  "test_rows": 20000,
+  "features": [
+    "branch",
+    "college_tier",
+    "cgpa",
+    "backlogs",
+    "coding_skills",
+    "projects_count",
+    "certifications",
+    "aptitude_score",
+    "communication_skills",
+    "internships",
+    "hackathons"
+  ],
+  "api_inputs": [
+    "branch",
+    "college_tier",
+    "cgpa",
+    "backlogs",
+    "coding_skills",
+    "dsa_score",
+    "ml_knowledge",
+    "system_design",
+    "projects_count",
+    "certifications",
+    "aptitude_score",
+    "communication_skills",
+    "internships",
+    "hackathons",
+    "open_source_contributions",
+    "extracurriculars"
+  ],
+  "ignored_api_inputs": [
+    "dsa_score",
+    "ml_knowledge",
+    "system_design",
+    "open_source_contributions",
+    "extracurriculars"
+  ],
+  "source_columns": {
+    "branch": "branch",
+    "college_tier": "college_tier",
+    "cgpa": "cgpa",
+    "backlogs": "backlogs",
+    "coding_skills": "coding_skill_score",
+    "projects_count": "projects_count",
+    "certifications": "certifications_count",
+    "aptitude_score": "aptitude_score",
+    "communication_skills": "communication_skill_score",
+    "internships": "internships_count",
+    "hackathons": "hackathons_participated"
+  },
+  "score_conversion": "Synthetic coding/communication 0-100 scores divided by 10; not real-world calibration.",
+  "unseen_branches": [
+    "ISE",
+    "Chemical"
+  ],
+  "unseen_branch_handling": "All branch indicators zero; no mapping to another department.",
+  "categorical_features": [
+    "branch",
+    "college_tier"
+  ],
+  "excluded_columns": [
+    "student_id",
+    "salary_package_lpa",
+    "placement_status",
+    "is_synthetic"
+  ],
+  "target": "placement_status",
+  "threshold": 0.5,
+  "random_state": 42,
+  "synthetic_data": true,
+  "disclaimer": "Experimental model trained on entirely synthetic data. Metrics do not establish real-world placement accuracy.",
+  "metrics": {
+    "accuracy": 0.7831,
+    "balanced_accuracy": 0.7774674885050147,
+    "f1": 0.8099535617278542,
+    "roc_auc": 0.863451837819404,
+    "confusion_matrix": {
+      "true_negative": 6418,
+      "false_positive": 2355,
+      "false_negative": 1983,
+      "true_positive": 9244
+    },
+    "classification_report": {
+      "Not Placed": {
+        "precision": 0.7639566718247828,
+        "recall": 0.73156274934458,
+        "f1-score": 0.7474088738791196,
+        "support": 8773.0
+      },
+      "Placed": {
+        "precision": 0.7969652556254849,
+        "recall": 0.8233722276654494,
+        "f1-score": 0.8099535617278542,
+        "support": 11227.0
+      },
+      "accuracy": 0.7831,
+      "macro avg": {
+        "precision": 0.7804609637251338,
+        "recall": 0.7774674885050147,
+        "f1-score": 0.7786812178034869,
+        "support": 20000.0
+      },
+      "weighted avg": {
+        "precision": 0.782486040341307,
+        "recall": 0.7831,
+        "f1-score": 0.7825183344030067,
+        "support": 20000.0
+      }
+    }
+  },
+  "trained_at_utc": "2026-11-23T09:57:05.485184+00:00"
+}
