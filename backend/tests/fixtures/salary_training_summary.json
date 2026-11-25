@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-11-23",
+  "provenance": {
+    "dataset": {
+      "sha256": "b9d88bd7afd389d42aa3c308fc026b50983f717c399597302c2f06bce2436e99",
+      "size_bytes": 16588102,
+      "verified_identical_sources": [
+        "salary_model/placement.csv",
+        "placement.csv"
+      ]
+    },
+    "model": {
+      "path": "models/placepro_salary_model_v2.pkl",
+      "sha256": "cd652f0056324984db56f2347aee46c1528adbea6bc86dbe62e764715e1b9958"
+    },
+    "training_script": {
+      "path": "salary_model/train_salary_model.py",
+      "sha256": "8601e8d7607106dfd155090090251282be15c0eb860495636417a9ca4d9e776b"
+    },
+    "method": "Read only the 12 salary inputs, placement_status and salary_package_lpa; normalize status with str.strip().str.lower(); keep status == placed; compute observed numeric minima/maxima and salary target range. No student rows or identifiers exported. No training executed."
+  },
+  "model_features": [
+    "cgpa",
+    "branch",
+    "college_tier",
+    "internships_count",
+    "projects_count",
+    "certifications_count",
+    "coding_skill_score",
+    "aptitude_score",
+    "communication_skill_score",
+    "hackathons_participated",
+    "backlogs",
+    "extracurricular_score"
+  ],
+  "target": {
+    "column": "salary_package_lpa",
+    "unit": "LPA",
+    "population": "placed",
+    "minimum": 7.11,
+    "maximum": 20.44
+  },
+  "population": {
+    "total_rows": 100000,
+    "placed_rows": 54459,
+    "not_placed_rows": 45541,
+    "not_placed_salary_all_zero": true
+  },
+  "numeric_feature_support": {
+    "cgpa": [
+      4.5,
+      10.0
+    ],
+    "internships_count": [
+      0.0,
+      8.0
+    ],
+    "projects_count": [
+      0.0,
+      13.0
+    ],
+    "certifications_count": [
+      0.0,
+      11.0
+    ],
+    "coding_skill_score": [
+      20.0,
+      100.0
+    ],
+    "aptitude_score": [
+      20.0,
+      100.0
+    ],
+    "communication_skill_score": [
+      20.0,
+      100.0
+    ],
+    "hackathons_participated": [
+      0.0,
+      7.0
+    ],
+    "backlogs": [
+      0.0,
+      5.0
+    ],
+    "extracurricular_score": [
+      0.0,
+      100.0
+    ]
+  },
+  "evaluation_notice": "Aggregate provenance and offline evaluation do not establish real-world placement or salary accuracy."
+}
