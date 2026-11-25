@@ -301,13 +301,23 @@ def verify_container_http(base):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument(
+        "--root", type=Path,
+        help="Repository or runtime directory; required outside scripts/ci.",
+    )
     for flag in ("source", "runtime", "development", "node", "openssl", "models", "image", "backend-tests"):
         parser.add_argument("--" + flag, action="store_true")
     parser.add_argument("--container-http", metavar="LOOPBACK_ORIGIN")
     args = parser.parse_args(argv)
-    root = args.root.resolve()
     try:
+        if args.root is not None:
+            root = args.root.resolve()
+        else:
+            script = Path(__file__).resolve()
+            require(script.parent.name == "ci" and script.parent.parent.name == "scripts",
+                    "Specify --root when running the verifier outside scripts/ci.")
+            root = script.parent.parent.parent
+        require(root.is_dir(), "Verification root must be an existing directory.")
         verify_python()
         verify_hashes(root)
         if args.source:
